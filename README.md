@@ -74,12 +74,12 @@ cmake --build --preset windows-debug
 
 | 変数 | 既定値 | 内容 |
 |------|--------|------|
-| `STUDIO_GFX_TAG` | `main` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
-| `STUDIO_MATHLIB_TAG` | `main` | SunsetMathLib のタグ / ブランチ / コミット |
+| `STUDIO_GFX_TAG` | `v0.1.0` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
+| `STUDIO_MATHLIB_TAG` | `v0.1.0` | SunsetMathLib のタグ / ブランチ / コミット |
 | `STUDIO_GITHUB_OWNER` | `SunsetTwilight` | GitHub のオーナー |
 | `STUDIO_GFX_URL` / `STUDIO_MATHLIB_URL` | 上から組み立てた URL | 取得元を直接指定する場合 |
 
-ブランチ (`main`) を指定した場合、URL が変わらないので、2 回目以降の構成では再ダウンロードされません。最新を取り込むには `--fresh` で構成し直してください。再現性が必要なときは、タグかコミットを指定してください。
+既定はリリースのタグです。ライブラリの最新 (`main`) を試すときは `-DSTUDIO_GFX_TAG=main` のように指定します。ブランチを指定した場合、URL が変わらないので、2 回目以降の構成では再ダウンロードされません。最新を取り込むには `--fresh` で構成し直してください。
 
 ### install 済みのライブラリを使う
 
