@@ -1,0 +1,88 @@
+# SunsetStudio
+
+[SunsetGraphicsEngine](../SunsetGraphicsEngine)(描画)と [SunsetMathLib](https://github.com/SunsetTwilight/SunsetMathLib)(数学)を組み合わせるアプリケーションです。最初のアプリは描画エディター(`SunsetEditor`)です。
+
+どちらのライブラリも単独で使えるように作られています。このリポジトリはそれらを使う側で、ライブラリのコードは含みません。
+
+> **現在の状態**: `SunsetEditor` は、依存ライブラリの取得・リンク・DLL の配置を確認するためのスタブです。エディター本体の設計は SunsetGraphicsEngine の [docs/design/editor-architecture.md](../SunsetGraphicsEngine/docs/design/editor-architecture.md)(Phase 4)を参照してください。
+
+---
+
+## ディレクトリ構成
+
+```
+SunsetStudio/
+├── CMakeLists.txt              ← ルート
+├── CMakePresets.json           ← 通常用 (GitHub から取得) / 開発用 (*-dev: 隣のフォルダを使用)
+├── cmake/
+│   ├── StudioDependencies.cmake ← 依存ライブラリの取得 (バージョンの固定はここだけ)
+│   └── StudioOptions.cmake      ← 共通の警告・定義
+└── editor/                     ← SunsetEditor
+```
+
+想定しているワークスペースの配置:
+
+```
+SunsetGraphicsEngineProject/
+├── SunsetGraphicsEngine/       ← ライブラリ
+├── SunsetMathLib/              ← ライブラリ
+└── SunsetStudio/               ← このリポジトリ
+```
+
+---
+
+## 依存ライブラリ
+
+| ライブラリ | 使うターゲット | 取得方法 |
+|-----------|---------------|---------|
+| SunsetGraphicsEngine | `SunsetGraphicsEngine::core`、`::schema`、`sunset_gfx_deploy_runtime()` | install 済みなら `find_package`、なければ FetchContent (git) |
+| SunsetMathLib | `MathLib::MathLib` | install 済みなら `find_package`、なければ FetchContent (git) |
+| Dear ImGui (docking) | `studio_imgui` | アーカイブを URL で取得 (SHA256 で固定) |
+| imnodes | `studio_imnodes` | アーカイブを URL で取得 (SHA256 で固定) |
+| nlohmann/json | `nlohmann_json::nlohmann_json` | アーカイブを URL で取得 (SHA256 で固定) |
+
+エンジンの DLL(`SunsetGraphicsEngine.dll`、`gfx_dx12.dll`、`dxcompiler.dll`)は、`sunset_gfx_deploy_runtime()` がビルド時に exe の横にコピーします。
+
+---
+
+## ビルド
+
+前提: Visual Studio 2022 (C++ デスクトップ開発)、CMake 3.24 以上、Ninja、DXC (`C:/dxc_2025_05_24`。変更する場合は `GFX_DXC_DIR`)。
+
+### 開発用 (隣のフォルダのライブラリを使う) — 通常はこちら
+
+ライブラリとアプリを同時に編集できます。ライブラリの変更は、アプリをビルドし直すだけで反映されます。
+
+```bat
+cmake --preset windows-dev-debug
+cmake --build --preset windows-dev-debug
+build\windows-dev-debug\bin\SunsetEditor.exe
+```
+
+`FETCHCONTENT_SOURCE_DIR_SUNSETGRAPHICSENGINE` と `FETCHCONTENT_SOURCE_DIR_SUNSETMATHLIB` で、`../SunsetGraphicsEngine` と `../SunsetMathLib` を指定しています。
+
+### 通常用 (GitHub から取得する)
+
+```bat
+cmake --preset windows-debug
+cmake --build --preset windows-debug
+```
+
+取得元とタグは `STUDIO_GFX_REPOSITORY` / `STUDIO_GFX_TAG` / `STUDIO_MATHLIB_REPOSITORY` / `STUDIO_MATHLIB_TAG` で変更できます。
+
+> SunsetGraphicsEngine はまだ GitHub に公開されていないため、このプリセットは現時点では使えません。公開するまでは開発用のプリセットを使ってください。
+
+### install 済みのライブラリを使う
+
+`CMAKE_PREFIX_PATH` にインストール先を指定すると、ダウンロードせずに `find_package` で見つけたパッケージを使います。
+
+```bat
+cmake --preset windows-release -DCMAKE_PREFIX_PATH=C:/path/to/prefix
+```
+
+---
+
+## 注意点
+
+- **git の safe.directory**: 所有者を記録しないドライブ (exFAT や一部のネットワークドライブなど) では、FetchContent の `git clone` が "dubious ownership" で失敗します。通常用のプリセットで自作ライブラリを取得する場合は、`git config --global --add safe.directory <パス>` で登録してください。外部ライブラリはアーカイブで取得するため、この問題は起きません。
+- **AVX2**: SunsetMathLib は既定で `/arch:AVX2` を利用側にも付けます (`MATHLIB_ENABLE_AVX2`)。そのため、SunsetEditor は AVX2 に対応した CPU でしか動きません。

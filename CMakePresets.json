@@ -1,0 +1,60 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "installDir": "${sourceDir}/install/${presetName}",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "GFX_DXC_DIR": "C:/dxc_2025_05_24"
+      }
+    },
+    {
+      "name": "local-libraries",
+      "hidden": true,
+      "description": "同じワークスペースの隣のフォルダにある SunsetGraphicsEngine / SunsetMathLib を直接使う",
+      "cacheVariables": {
+        "FETCHCONTENT_SOURCE_DIR_SUNSETGRAPHICSENGINE": "${sourceDir}/../SunsetGraphicsEngine",
+        "FETCHCONTENT_SOURCE_DIR_SUNSETMATHLIB":        "${sourceDir}/../SunsetMathLib",
+        "FETCHCONTENT_TRY_FIND_PACKAGE_MODE":           "NEVER"
+      }
+    },
+
+    {
+      "name": "windows-debug",
+      "displayName": "Windows — Debug (ライブラリを GitHub から取得)",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "GFX_ENABLE_VALIDATION": "ON" }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows — Release (ライブラリを GitHub から取得)",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "windows-dev-debug",
+      "displayName": "Windows — Debug (隣のフォルダのライブラリを使う)",
+      "inherits": [ "local-libraries", "base" ],
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "GFX_ENABLE_VALIDATION": "ON" }
+    },
+    {
+      "name": "windows-dev-release",
+      "displayName": "Windows — Release (隣のフォルダのライブラリを使う)",
+      "inherits": [ "local-libraries", "base" ],
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "windows-debug",       "configurePreset": "windows-debug"       },
+    { "name": "windows-release",     "configurePreset": "windows-release"     },
+    { "name": "windows-dev-debug",   "configurePreset": "windows-dev-debug"   },
+    { "name": "windows-dev-release", "configurePreset": "windows-dev-release" }
+  ]
+}
