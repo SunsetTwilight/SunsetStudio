@@ -35,8 +35,8 @@ SunsetGraphicsEngineProject/
 
 | ライブラリ | 使うターゲット | 取得方法 |
 |-----------|---------------|---------|
-| SunsetGraphicsEngine | `SunsetGraphicsEngine::core`、`::schema`、`sunset_gfx_deploy_runtime()` | install 済みなら `find_package`、なければ FetchContent (git) |
-| SunsetMathLib | `MathLib::MathLib` | install 済みなら `find_package`、なければ FetchContent (git) |
+| SunsetGraphicsEngine | `SunsetGraphicsEngine::core`、`::schema`、`sunset_gfx_deploy_runtime()` | install 済みなら `find_package`、なければ GitHub のアーカイブを取得 |
+| SunsetMathLib | `MathLib::MathLib` | install 済みなら `find_package`、なければ GitHub のアーカイブを取得 |
 | Dear ImGui (docking) | `studio_imgui` | アーカイブを URL で取得 (SHA256 で固定) |
 | imnodes | `studio_imnodes` | アーカイブを URL で取得 (SHA256 で固定) |
 | nlohmann/json | `nlohmann_json::nlohmann_json` | アーカイブを URL で取得 (SHA256 で固定) |
@@ -68,9 +68,16 @@ cmake --preset windows-debug
 cmake --build --preset windows-debug
 ```
 
-取得元とタグは `STUDIO_GFX_REPOSITORY` / `STUDIO_GFX_TAG` / `STUDIO_MATHLIB_REPOSITORY` / `STUDIO_MATHLIB_TAG` で変更できます。
+`https://github.com/SunsetTwilight/<リポジトリ>/archive/<タグ>.tar.gz` を取得します。取得するバージョンは次の変数で変更できます。
 
-> SunsetGraphicsEngine はまだ GitHub に公開されていないため、このプリセットは現時点では使えません。公開するまでは開発用のプリセットを使ってください。
+| 変数 | 既定値 | 内容 |
+|------|--------|------|
+| `STUDIO_GFX_TAG` | `main` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
+| `STUDIO_MATHLIB_TAG` | `main` | SunsetMathLib のタグ / ブランチ / コミット |
+| `STUDIO_GITHUB_OWNER` | `SunsetTwilight` | GitHub のオーナー |
+| `STUDIO_GFX_URL` / `STUDIO_MATHLIB_URL` | 上から組み立てた URL | 取得元を直接指定する場合 |
+
+ブランチ (`main`) を指定した場合、URL が変わらないので、2 回目以降の構成では再ダウンロードされません。最新を取り込むには `--fresh` で構成し直してください。再現性が必要なときは、タグかコミットを指定してください。
 
 ### install 済みのライブラリを使う
 
@@ -84,5 +91,5 @@ cmake --preset windows-release -DCMAKE_PREFIX_PATH=C:/path/to/prefix
 
 ## 注意点
 
-- **git の safe.directory**: 所有者を記録しないドライブ (exFAT や一部のネットワークドライブなど) では、FetchContent の `git clone` が "dubious ownership" で失敗します。通常用のプリセットで自作ライブラリを取得する場合は、`git config --global --add safe.directory <パス>` で登録してください。外部ライブラリはアーカイブで取得するため、この問題は起きません。
+- **git clone を使わない理由**: 所有者を記録しないドライブ (exFAT や一部のネットワークドライブなど) では、FetchContent の `git clone` が "dubious ownership" で失敗します。そのため、依存ライブラリはすべて GitHub のアーカイブで取得しています。リポジトリを Private にすると認証なしではアーカイブを取得できないので、その場合は開発用のプリセットか install 済みのパッケージを使ってください。
 - **AVX2**: SunsetMathLib は既定で `/arch:AVX2` を利用側にも付けます (`MATHLIB_ENABLE_AVX2`)。そのため、SunsetEditor は AVX2 に対応した CPU でしか動きません。

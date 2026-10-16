@@ -18,19 +18,27 @@
 include(FetchContent)
 
 # ---- 自作ライブラリ ----
-set(STUDIO_GFX_REPOSITORY  "https://github.com/SunsetTwilight/SunsetGraphicsEngine.git" CACHE STRING "SunsetGraphicsEngine の取得元")
-set(STUDIO_GFX_TAG         "main"                                                    CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ")
-set(STUDIO_MATHLIB_REPOSITORY "https://github.com/SunsetTwilight/SunsetMathLib.git"  CACHE STRING "SunsetMathLib の取得元")
-set(STUDIO_MATHLIB_TAG     "main"                                                    CACHE STRING "SunsetMathLib のタグ / ブランチ")
+# GitHub のアーカイブ (archive/<タグ / ブランチ / コミット>.tar.gz) を取得する。
+# git clone は、所有者を記録しないドライブで "dubious ownership" として失敗するため使わない。
+# ※ ブランチ (main) を指定した場合、URL が変わらないので 2 回目以降は再ダウンロードされない。
+#    最新を取り込むには build/<preset>/_deps を削除するか --fresh で構成し直す。
+#    再現性が必要なときはタグかコミットを指定する。
+set(STUDIO_GITHUB_OWNER "SunsetTwilight" CACHE STRING "自作ライブラリの GitHub のオーナー")
+set(STUDIO_GFX_TAG      "main"           CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
+set(STUDIO_MATHLIB_TAG  "main"           CACHE STRING "SunsetMathLib のタグ / ブランチ / コミット")
+set(STUDIO_GFX_URL      "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetGraphicsEngine/archive/${STUDIO_GFX_TAG}.tar.gz"
+    CACHE STRING "SunsetGraphicsEngine の取得元 (アーカイブの URL)")
+set(STUDIO_MATHLIB_URL  "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetMathLib/archive/${STUDIO_MATHLIB_TAG}.tar.gz"
+    CACHE STRING "SunsetMathLib の取得元 (アーカイブの URL)")
 
 FetchContent_Declare(SunsetGraphicsEngine
-    GIT_REPOSITORY   ${STUDIO_GFX_REPOSITORY}
-    GIT_TAG          ${STUDIO_GFX_TAG}
+    URL              ${STUDIO_GFX_URL}
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     FIND_PACKAGE_ARGS 1
 )
 FetchContent_Declare(SunsetMathLib
-    GIT_REPOSITORY   ${STUDIO_MATHLIB_REPOSITORY}
-    GIT_TAG          ${STUDIO_MATHLIB_TAG}
+    URL              ${STUDIO_MATHLIB_URL}
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     FIND_PACKAGE_ARGS NAMES MathLib
 )
 
