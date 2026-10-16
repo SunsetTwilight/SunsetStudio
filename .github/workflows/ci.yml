@@ -1,0 +1,43 @@
+# ============================================================
+#  CI: ビルドと結合テスト (Windows)
+#
+#  依存ライブラリ (SunsetGraphicsEngine / SunsetMathLib) は、cmake/StudioDependencies.cmake の
+#  設定どおり GitHub のアーカイブから取得する (STUDIO_GFX_TAG / STUDIO_MATHLIB_TAG)。
+#  GitHub のランナーには GPU がないため、テストは WARP で実行する (GFX_TEST_ADAPTER=software)。
+# ============================================================
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows (${{ matrix.config }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [ Debug, Release ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DSTUDIO_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --parallel
+
+      - name: Test (WARP)
+        env:
+          GFX_TEST_ADAPTER: software
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure

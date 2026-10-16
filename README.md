@@ -17,7 +17,9 @@ SunsetStudio/
 ├── cmake/
 │   ├── StudioDependencies.cmake ← 依存ライブラリの取得 (バージョンの固定はここだけ)
 │   └── StudioOptions.cmake      ← 共通の警告・定義
-└── editor/                     ← SunsetEditor
+├── editor/                     ← SunsetEditor
+├── tests/                      ← 結合テスト (doctest)
+└── .github/workflows/ci.yml    ← GitHub Actions
 ```
 
 想定しているワークスペースの配置:
@@ -86,6 +88,18 @@ cmake --build --preset windows-debug
 ```bat
 cmake --preset windows-release -DCMAKE_PREFIX_PATH=C:/path/to/prefix
 ```
+
+---
+
+## 自動テスト
+
+`tests/` に、両ライブラリの結合テストがあります (doctest + CTest)。エンジンの DLL の配置と初期化、MathLib、スキーマを確認します。
+
+```bat
+ctest --test-dir build\windows-dev-debug --output-on-failure
+```
+
+GPU のない環境では `set GFX_TEST_ADAPTER=software` で WARP を使います。GitHub Actions (`.github/workflows/ci.yml`) では、GitHub から取得したライブラリで Debug / Release のビルドとテストを WARP で実行します。
 
 ---
 

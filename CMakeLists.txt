@@ -30,3 +30,9 @@ include(StudioOptions)        # studio_options (警告・定義の共通設定)
 include(StudioDependencies)   # SunsetGraphicsEngine / MathLib / ImGui / imnodes / nlohmann_json
 
 add_subdirectory(editor)
+
+option(STUDIO_BUILD_TESTS "自動テスト (doctest) をビルドする。configure 時に doctest を取得する" ON)
+if(STUDIO_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
