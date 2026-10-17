@@ -5,6 +5,11 @@
 #include "services/SchemaJson.h"
 
 #include "gfx/rendergraph/GraphJson.h"
+#include "host/FileDialog.h"
+
+#include <fstream>
+#include <process.h>   // _getpid
+#include <sstream>
 
 #include <algorithm>
 #include <cmath>
@@ -16,6 +21,9 @@
 
 #ifndef STUDIO_VERSION
 #define STUDIO_VERSION "0.0.0"
+#endif
+#ifndef STUDIO_GFX_VERSION
+#define STUDIO_GFX_VERSION ""
 #endif
 
 namespace studio
@@ -148,6 +156,8 @@ int EditorApp::run()
 		return 1;
 	}
 	registerMethods();
+	registerProjectMethods();
+	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
 	RenderThread::Config renderConfig;
@@ -156,7 +166,6 @@ int EditorApp::run()
 #ifdef STUDIO_GFX_VALIDATION
 	renderConfig.device.validation = true;
 #endif
-	renderConfig.assetRoot = m_options.assetRoot;
 
 	RenderThread::Callbacks callbacks;
 	callbacks.message = [this](GfxMessageSeverity s, int32_t id, const std::string& text) { onEngineMessage(s, id, text); };
@@ -171,6 +180,31 @@ int EditorApp::run()
 	m_host.setCloseHandler([this](std::function<void()> proceed) {
 		m_render.detachViewport([this, proceed] { m_host.post(proceed); });
 	});
+
+	// ---- プロジェクト: スモークテストは一時フォルダにテンプレートから作る。コマンドラインで渡されたものを開く ----
+	if (m_options.smokeTest)
+	{
+		std::error_code ec;
+		m_smokeDir = std::filesystem::temp_directory_path() / ("sunset_editor_smoke_" + std::to_string(_getpid()));
+		std::filesystem::remove_all(m_smokeDir, ec);
+		m_host.bridge().callLocal("project.create",
+			{ { "location", pathToUtf8(m_smokeDir) }, { "name", "Smoke" }, { "template", "deferred" }, { "remember", false } },
+			[this](int status, const Json& r) {
+				m_host.post([this, status, r] {
+					if (status != 0)
+					{
+						log("error", "smoke", "テンプレートからプロジェクトを作れません: " + r.dump());
+						m_smokeProjectFailed = true;
+					}
+					checkSmokeTest();
+				});
+			});
+	}
+	else if (!m_options.projectFile.empty())
+		m_host.bridge().callLocal("project.open", { { "file", pathToUtf8(m_options.projectFile) } }, [this](int status, const Json& r) {
+			if (status != 0)
+				m_host.post([this, r] { log("error", "project", "プロジェクトを開けません: " + r.value("message", r.dump())); });
+		});
 
 	// ---- UI ----
 	if (!m_host.loadUi(m_options.uiIndex, m_options.uiDevUrl, error))
@@ -218,6 +252,11 @@ int EditorApp::run()
 	// エンジン (とスワップチェーン) を終了してから、ビューポートのウィンドウと WebView を破棄する
 	m_render.stop();
 	m_viewport.destroy();
+	if (!m_smokeDir.empty())
+	{
+		std::error_code ec;
+		std::filesystem::remove_all(m_smokeDir, ec);
+	}
 	return m_exitCode;
 }
 
@@ -519,6 +558,13 @@ void EditorApp::checkSmokeTest()
 
 	switch (m_smokeStage)
 	{
+	case SmokeStage::WaitProject:
+		if (m_smokeProjectFailed)
+			return finish(8, "テンプレートからプロジェクトを作って開けない");
+		if (!m_project)
+			return;
+		m_smokeStage = SmokeStage::WaitFrames;
+		[[fallthrough]];
 	case SmokeStage::WaitFrames:
 		// ビューポートが描けるまで待つ
 		if (m_framesDrawn < m_options.smokeFrames)
@@ -612,14 +658,204 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 				m_host.bridge().callLocal("graph.set", { { "graph", broken } }, [this, done, original](int s3, const Json& r3) {
 					if (s3 == 0 || r3.value("code", 0) != static_cast<int>(BridgeError::InvalidParams))
 						return done(false, "コンパイルできないグラフがエラーにならない: " + r3.dump());
-					m_host.bridge().callLocal("graph.set", { { "graph", original } }, [done](int s4, const Json& r4) {
+					m_host.bridge().callLocal("graph.set", { { "graph", original } }, [this, done](int s4, const Json& r4) {
 						if (s4 != 0 || r4["order"].size() != 4)
 							return done(false, "元に戻せない: " + r4.dump());
-						done(true, {});
+						// 保存はプロジェクトの Assets/ に書く
+						m_host.bridge().callLocal("graph.save", Json::object(), [this, done](int s5, const Json& r5) {
+							if (s5 != 0)
+								return done(false, "graph.save: " + r5.dump());
+							m_host.post([this, done] {
+								std::error_code ec;
+								const auto file = m_project ? m_project->assetRoot() / pathFromUtf8(m_project->desc.viewportGraph) : std::filesystem::path();
+								const bool inProject = !file.empty() && std::filesystem::exists(file, ec) && !m_smokeDir.empty()
+									&& pathToUtf8(file).rfind(pathToUtf8(m_smokeDir), 0) == 0;
+								if (!inProject)
+									return done(false, "graph.save がプロジェクトに書いていない: " + pathToUtf8(file));
+								log("info", "smoke", "graph.save: プロジェクトに保存");
+								done(true, {});
+							});
+						});
 					});
 				});
 			});
 		});
+	});
+}
+// ============================================================
+//  プロジェクト (M4a)
+// ============================================================
+Json EditorApp::projectJson() const
+{
+	if (!m_project)
+		return { { "open", false } };
+	return {
+		{ "open",      true },
+		{ "name",      m_project->desc.name },
+		{ "file",      pathToUtf8(m_project->file) },
+		{ "dir",       pathToUtf8(m_project->dir()) },
+		{ "assetRoot", pathToUtf8(m_project->assetRoot()) },
+		{ "engine",    m_project->desc.engine },
+		{ "graph",     m_project->desc.viewportGraph },
+	};
+}
+
+void EditorApp::openProject(const std::filesystem::path& file, std::function<void(bool, const Json&, const std::string&)> done)
+{
+	if (m_projectBusy)
+		return done(false, {}, "ほかのプロジェクトを開いています");
+	Project project;
+	ProjectDiagnostics diag;
+	if (!loadProject(file, project, diag, STUDIO_GFX_VERSION))
+	{
+		std::string message = "プロジェクトを開けません: " + pathToUtf8(file);
+		for (const auto& e : diag.errors) message += "\n" + e;
+		return done(false, {}, message);
+	}
+	for (const auto& w : diag.warnings)
+		log("warning", "project", w);
+
+	m_projectBusy = true;
+	m_render.openProject(project.assetRoot(), project.desc.viewportGraph,
+		[this, project, done](bool ok, const std::string& error) {
+			// 描画スレッドから呼ばれる
+			m_host.post([this, project, done, ok, error] {
+				m_projectBusy = false;
+				if (!ok)
+				{
+					m_project.reset();
+					m_host.setTitle("SunsetEditor");
+					m_host.emit("project.changed", projectJson());
+					return done(false, {}, "プロジェクトのビューポートを作れません: " + error);
+				}
+				m_project = project;
+				m_host.setTitle(project.desc.name + " - SunsetEditor");
+				log("info", "project", "プロジェクトを開きました: " + pathToUtf8(project.file));
+				const Json info = projectJson();
+				m_host.emit("project.changed", info);
+				done(true, info, {});
+			});
+		});
+}
+
+void EditorApp::registerProjectMethods()
+{
+	Bridge& b = m_host.bridge();
+	auto reply = [](Bridge::Reply r) {
+		return [r](bool ok, const Json& result, const std::string& error) {
+			if (ok) r.ok(result);
+			else    r.error(BridgeError::InvalidParams, error);
+		};
+	};
+
+	b.registerMethod("project.info", [this](const Json&, Bridge::Reply r) { r.ok(projectJson()); });
+
+	b.registerMethod("project.recent", [this](const Json&, Bridge::Reply r) {
+		m_recent.load();
+		Json list = Json::array();
+		for (const auto& e : m_recent.entries())
+			list.push_back({ { "file", pathToUtf8(e.file) }, { "name", e.name }, { "exists", e.exists } });
+		const std::filesystem::path docs = documentsFolder();
+		r.ok({ { "projects", list }, { "defaultLocation", docs.empty() ? std::string() : pathToUtf8(docs / "SunsetStudio") } });
+	});
+
+	b.registerMethod("project.templates", [this](const Json&, Bridge::Reply r) {
+		Json list = Json::array();
+		std::error_code ec;
+		for (const auto& e : std::filesystem::directory_iterator(m_options.templateRoot, ec))
+			if (e.is_directory(ec))
+			{
+				const std::string id = pathToUtf8(e.path().filename());
+				list.push_back({ { "id", id }, { "label", id == "deferred" ? "ディファード (G-Buffer → ライティング → グリッド → 合成)" : id } });
+			}
+		r.ok(list);
+	});
+
+	b.registerMethod("project.open", [this, reply](const Json& p, Bridge::Reply r) {
+		const std::filesystem::path file = pathFromUtf8(p.at("file").get<std::string>());
+		openProject(file, [this, r, reply](bool ok, const Json& result, const std::string& error) {
+			if (ok)
+			{
+				m_recent.add(*m_project);
+				m_recent.save();
+			}
+			reply(r)(ok, result, error);
+		});
+	});
+
+	// location の下に <name>/<name>.sunsetproj を作り、テンプレートを Assets/ にコピーして開く
+	b.registerMethod("project.create", [this, reply](const Json& p, Bridge::Reply r) {
+		const std::string           name     = p.at("name").get<std::string>();
+		const std::filesystem::path location = pathFromUtf8(p.at("location").get<std::string>());
+		const std::string           tmpl     = p.value("template", std::string("deferred"));
+		const bool                  remember = p.value("remember", true);
+		if (tmpl.find_first_of("/\\.") != std::string::npos)
+			return r.error(BridgeError::InvalidParams, "テンプレートの名前が不正です: " + tmpl);
+		Project created;
+		std::string error;
+		if (!createProject(location, name, m_options.templateRoot / pathFromUtf8(tmpl), STUDIO_GFX_VERSION, created, error))
+			return r.error(BridgeError::InvalidParams, error);
+		log("info", "project", "プロジェクトを作りました: " + pathToUtf8(created.file));
+		openProject(created.file, [this, r, reply, remember](bool ok, const Json& result, const std::string& err) {
+			if (ok && remember)
+			{
+				m_recent.add(*m_project);
+				m_recent.save();
+			}
+			reply(r)(ok, result, err);
+		});
+	});
+
+	b.registerMethod("project.close", [this](const Json&, Bridge::Reply r) {
+		if (m_projectBusy)
+			return r.error(BridgeError::Unavailable, "プロジェクトを開いています");
+		m_render.closeProject([this, r] {
+			m_host.post([this, r] {
+				m_project.reset();
+				m_host.setTitle("SunsetEditor");
+				m_host.emit("project.changed", projectJson());
+				r.ok(projectJson());
+			});
+		});
+	});
+
+	// パネルの配置 (UI が決めた JSON をそのまま Saved/Layout.json に置く)
+	b.registerMethod("project.layout.get", [this](const Json&, Bridge::Reply r) {
+		if (!m_project)
+			return r.ok({ { "layout", nullptr } });
+		std::ifstream f(m_project->layoutFile(), std::ios::binary);
+		if (!f)
+			return r.ok({ { "layout", nullptr } });
+		std::stringstream ss;
+		ss << f.rdbuf();
+		try
+		{
+			r.ok({ { "layout", Json::parse(ss.str()) } });
+		}
+		catch (const std::exception&)
+		{
+			r.ok({ { "layout", nullptr } });   // 壊れていたら既定の配置
+		}
+	});
+	b.registerMethod("project.layout.set", [this](const Json& p, Bridge::Reply r) {
+		if (!m_project)
+			return r.error(BridgeError::Unavailable, "プロジェクトを開いていません");
+		std::error_code ec;
+		std::filesystem::create_directories(m_project->savedDir(), ec);
+		std::ofstream f(m_project->layoutFile(), std::ios::binary | std::ios::trunc);
+		if (!f || !(f << p.at("layout").dump(1)))
+			return r.error(BridgeError::Internal, "書き込めません: " + pathToUtf8(m_project->layoutFile()));
+		r.ok();
+	});
+
+	// ---- OS のダイアログ (UI スレッドで、閉じるまで戻らない) ----
+	b.registerMethod("dialog.openProject", [this](const Json&, Bridge::Reply r) {
+		const auto file = openProjectDialog(m_host.nativeWindow());
+		r.ok({ { "file", file ? Json(pathToUtf8(*file)) : Json(nullptr) } });
+	});
+	b.registerMethod("dialog.pickFolder", [this](const Json& p, Bridge::Reply r) {
+		const auto folder = pickFolderDialog(m_host.nativeWindow(), pathFromUtf8(p.value("initial", std::string())));
+		r.ok({ { "folder", folder ? Json(pathToUtf8(*folder)) : Json(nullptr) } });
 	});
 }
 } // namespace studio

@@ -58,18 +58,21 @@ void makeCube(std::vector<Vertex>& vertices, std::vector<uint16_t>& indices)
 }
 } // namespace
 
-bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, const std::filesystem::path& assetRoot, std::string& error)
+bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, const std::filesystem::path& assetRoot,
+                            const std::string& graphFile, std::string& error)
 {
 	m_root      = assetRoot;
+	m_graphFile = graphFile;
+	m_reportedPipelineErrors = m_reportedExecutorErrors = 0;
 	m_pipelines = std::make_unique<gfx::rg::PipelineLibrary>(engine, shaders);
 	m_pipelines->setRoot(assetRoot);
 	m_executor  = std::make_unique<gfx::rg::Executor>(engine, *m_pipelines);
 	m_options.bindingLayout = [this](const std::string& p) { return m_pipelines->bindingLayout(p); };
 
-	m_graph = std::make_unique<gfx::rg::GraphAsset>(assetRoot / gfx::rg::pathFromUtf8(k_GraphFile));
+	m_graph = std::make_unique<gfx::rg::GraphAsset>(assetRoot / gfx::rg::pathFromUtf8(graphFile));
 	if (!m_graph->load(m_options))
 	{
-		error = "ビューポートのグラフ (" + std::string(k_GraphFile) + ") を読めませんでした";
+		error = "ビューポートのグラフ (" + graphFile + ") を読めませんでした";
 		for (const auto& m : m_graph->messages())
 			error += "\n" + m;
 		return false;

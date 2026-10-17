@@ -29,7 +29,7 @@ SunsetStudio/
 │   │   ├── render/RenderThread.* ← エンジンを持つ描画スレッド (ビューポートのフレームのループ)
 │   │   ├── render/ViewportRenderer.* ← ビューポートをレンダーグラフで描く
 │   │   └── viewport/ViewportWindow* ← ビューポートの子ウィンドウとマウスの入力
-│   ├── assets/                 ← ビューポートのアセット (graphs/ pipelines/ shaders/。編集するとその場で反映される)
+│   ├── templates/deferred/     ← プロジェクトのテンプレート (graphs/ pipelines/ shaders/)
 │   └── frontend/               ← UI (React + TypeScript + Vite + dockview)
 ├── tests/                      ← 結合テスト、Bridge の単体テスト、エディターのスモークテスト (doctest)
 ├── docs/design/                ← 設計ドキュメント
@@ -114,10 +114,22 @@ cmake --preset windows-release -DCMAKE_PREFIX_PATH=C:/path/to/prefix
 
 ```bat
 build\windows-dev-debug\bin\SunsetEditor.exe
+build\windows-dev-debug\bin\SunsetEditor.exe D:\Work\MyGame\MyGame.sunsetproj
+```
+
+プロジェクト (`.sunsetproj`) を指定しないと起動画面が出ます。最近のプロジェクトから選ぶか、「開く…」で選ぶか、
+テンプレートから新しいプロジェクトを作ります。プロジェクトは次の形です (詳しくは docs/design/editor-shell.md の「プロジェクトファイル」)。
+
+```
+MyGame/
+├── MyGame.sunsetproj   ← プロジェクトファイル (JSON)
+├── Assets/             ← グラフ、パイプライン、シェーダー (git で管理する)
+└── Saved/              ← パネルの配置など (git で管理しない)
 ```
 
 | 指定 | 内容 |
 |------|------|
+| `<ファイル>.sunsetproj` | そのプロジェクトを開いて起動する |
 | `--software` / `STUDIO_ADAPTER=software` | WARP (ソフトウェアレンダラー) を使う |
 | `--devtools` / `STUDIO_DEVTOOLS=1` | 開発者ツール (F12) を使えるようにする。Debug ビルドでは常に有効 |
 | `STUDIO_UI_DEV_URL=http://localhost:5173` | Vite の開発サーバーの UI を開く (localhost のみ) |
@@ -137,11 +149,11 @@ build\windows-dev-debug\bin\SunsetEditor.exe
 ```
 
 ビューポートの操作: 左ドラッグで回転、中 / 右ドラッグで平行移動、ホイールでズーム、F キーで視点を戻す。
-`editor/assets/` のファイル (グラフ `graphs/viewport.json`、パイプライン `pipelines/*.json`、シェーダー `shaders/*.hlsl`) を保存すると、
-実行中のビューポートにその場で反映されます (ビルドツリーの exe はソースのフォルダを読み書きします)。
+開いたプロジェクトの `Assets/` のファイル (グラフ `graphs/viewport.json`、パイプライン `pipelines/*.json`、シェーダー `shaders/*.hlsl`) を保存すると、
+実行中のビューポートにその場で反映されます。
 エディターの「レンダーグラフ」パネルとインスペクターで、パスの有効 / 無効、つなぎ方、リソースのフォーマット、
 パイプラインのステートを編集して保存することもできます。
-インスペクターでは、パイプライン (立方体 / グリッド) を選び、ブレンド、ラスタライザー、深度ステンシル、入力レイアウトなどの値を変えると、すぐビューポートに反映されます。
+インスペクターでは、パイプラインのアセットを選び、ブレンド、ラスタライザー、深度ステンシル、入力レイアウトなどの値を変えると、すぐビューポートに反映されます。
 既定値と違うフィールドは名前が強調され、不正な値や PSO を作れない組み合わせはエラーとして表示されます (エンジン側は元のまま)。
 
 パネルはタブをドラッグして移動 / 分割できます。ビューポートの上には Web の UI を重ねられないため、ドラッグ中はビューポートを隠します。
@@ -156,7 +168,7 @@ C++ と JS の間のメソッドとイベントの型は `editor/frontend/src/br
 |-------|------|-----------|
 | `integration` | エンジンの DLL の配置と初期化、MathLib、スキーマ | GPU または WARP |
 | `unit` | Bridge (RPC) と、スキーマと JSON の橋渡しの単体テスト | なし |
-| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートの描画、インスペクターの経路 (`pipeline.update`)、レンダーグラフの経路 (`graph.set`) を確認し、D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
+| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートの描画、テンプレートから一時フォルダに作ったプロジェクト、インスペクターの経路 (`pipeline.update`)、レンダーグラフの経路 (`graph.set` と、プロジェクトへの `graph.save`) を確認し、D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
 
 ```bat
 ctest --test-dir build\windows-dev-debug --output-on-failure

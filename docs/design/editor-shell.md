@@ -160,8 +160,9 @@ editor/
 │   ├── viewport/ViewportWindow_win32.cpp
 │   ├── render/RenderThread.{h,cpp} ← エンジンを持つスレッド、コマンドのキュー
 │   ├── render/ViewportRenderer.{h,cpp} ← ビューポートをレンダーグラフで描く (M3d)
-│   └── services/                   ← app / viewport / log / stats / schema / pipeline のハンドラー
-├── assets/                         ← ビューポートのアセット (M3d)
+│   ├── host/FileDialog*            ← OS のファイル / フォルダの選択ダイアログ (M4a)
+│   └── services/                   ← SchemaJson (スキーマと JSON)、Project (プロジェクトファイルと最近の一覧、M4a)
+├── templates/deferred/             ← プロジェクトのテンプレート (中身が新しいプロジェクトの Assets/ になる)
 │   ├── graphs/viewport.json        ←   レンダーグラフ (GBuffer → Lighting → Grid → Composite)
 │   ├── pipelines/*.json            ←   パイプライン (シェーダー、バインディングレイアウト、ステート)
 │   └── shaders/*.hlsl              ←   シェーダー
@@ -333,7 +334,20 @@ MyGame/
 
 - 置き場所は SunsetStudio。エンジンは「基準のフォルダ」を受け取るだけなので、変更は要らない。
 - スモークテストは、一時フォルダにテンプレートからプロジェクトを作って開く (ソースのフォルダを書き換えない)。
-- プロジェクトを指定せずに起動したときの扱い (起動画面を出すか、前回のプロジェクトを開くか) は M4a で決める。
+- プロジェクトを指定せずに起動したときは、起動画面 (最近のプロジェクト / 新規作成 / 開く) を出す (2026-10-17 決定)。
+
+### M4a の実装状況 (完了)
+
+| 項目 | 内容 |
+|------|------|
+| プロジェクトファイル | `services/Project.*` (GPU / webview に依存しない): `.sunsetproj` の読み書き (型の違いはエラー、知らないキーは警告、`assets` は相対パスだけ、プロジェクトの `engine` が新しければ警告)、テンプレートからの作成 (`<場所>/<名前>/<名前>.sunsetproj`、`Assets/` にテンプレートをコピー、`Saved/` と `.gitignore`。名前の検査、空でない既存のフォルダには作らない)、最近のプロジェクト (`%LOCALAPPDATA%/SunsetStudio/recent.json`、新しい順に最大 12 件、なくなったものは印を付ける) |
+| テンプレート | エディターのアセットを `editor/templates/deferred/` に移した (ビルドツリーではソース、配布では `bin/templates/`)。エディターがソースのアセットを書き換えることはなくなった |
+| 描画スレッド | `RenderThread::openProject` / `closeProject`。プロジェクトを開くたびに `ShaderLibrary` と `ViewportRenderer` を作り直す (前のプロジェクトのシェーダーの検索パスを持ち越さない)。開いていないあいだは描かない |
+| メソッド | `project.info` / `project.recent` (一覧と、新規作成の既定の場所 `ドキュメント/SunsetStudio`) / `project.templates` / `project.open {file}` / `project.create {location, name, template}` / `project.close` / `project.layout.get` / `project.layout.set {layout}` / `dialog.openProject` / `dialog.pickFolder {initial}` (`IFileOpenDialog`)。イベント `project.changed` |
+| 起動 | コマンドラインに `.sunsetproj` があれば開く。なければ起動画面。ウィンドウのタイトルは「<名前> - SunsetEditor」 |
+| UI | `panels/StartScreen.tsx`: 最近のプロジェクト (クリックで開く)、「開く…」、新規作成 (名前、場所と「参照…」、テンプレート、作るファイルのパスの表示)。ツールバーにプロジェクト名と「閉じる」。プロジェクトが変わったら、グラフ / 選択 / 統計を捨てて読み直す |
+| パネルの配置 | dockview の配置を `Saved/Layout.json` に保存し (変わってから 0.5 秒後)、開いたときに戻す。読めなければ既定の配置。カメラの位置の保存は後で |
+| テスト | `studio_tests_unit` に `test_project.cpp` (JSON と診断、テンプレートから作って開く、名前の検査、壊れた / ないファイル、最近の一覧の並びと上限と保存)。スモークテストは一時フォルダにテンプレートから作って開き (最近の一覧には入れない)、最後に `graph.save` がプロジェクトの `Assets/` に書くことを確認する (終了コード 8 = プロジェクトを作って開けない)。終了時に一時フォルダを消す。手元では CDP で、起動画面 → 新規作成 → 閉じる → 最近の一覧から開き直す → 同じ名前での作成がエラー、コマンドラインで開く (タイトル)、サッシのドラッグで配置が保存され次の起動で戻ることを確認した (D3D12 のメッセージ 0 件) |
 
 ---
 

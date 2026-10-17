@@ -142,6 +142,28 @@ export interface GraphInfo {
   pipelines: string[]; // プロジェクトのパイプラインのアセット
 }
 
+// ---- プロジェクト (M4a) ----
+export interface ProjectInfo {
+  open: boolean;
+  name?: string;
+  file?: string; // .sunsetproj の絶対パス
+  dir?: string;
+  assetRoot?: string;
+  engine?: string;
+  graph?: string;
+}
+
+export interface RecentProject {
+  file: string;
+  name: string;
+  exists: boolean;
+}
+
+export interface ProjectTemplate {
+  id: string;
+  label: string;
+}
+
 // JS → C++ (studio.call)
 export interface Methods {
   'schema.types': { params: Record<string, never>; result: { structs: string[]; enums: string[] } };
@@ -156,6 +178,16 @@ export interface Methods {
   'graph.get': { params: Record<string, never>; result: GraphInfo };
   'graph.set': { params: { graph: JsonObject }; result: GraphInfo };
   'graph.save': { params: Record<string, never>; result: { revision: number } };
+  'project.info': { params: Record<string, never>; result: ProjectInfo };
+  'project.recent': { params: Record<string, never>; result: { projects: RecentProject[]; defaultLocation: string } };
+  'project.templates': { params: Record<string, never>; result: ProjectTemplate[] };
+  'project.open': { params: { file: string }; result: ProjectInfo };
+  'project.create': { params: { location: string; name: string; template: string }; result: ProjectInfo };
+  'project.close': { params: Record<string, never>; result: ProjectInfo };
+  'project.layout.get': { params: Record<string, never>; result: { layout: JsonValue } };
+  'project.layout.set': { params: { layout: JsonValue }; result: Record<string, never> };
+  'dialog.openProject': { params: Record<string, never>; result: { file: string | null } };
+  'dialog.pickFolder': { params: { initial?: string }; result: { folder: string | null } };
   'ui.ready': { params: Record<string, never>; result: { protocol: number } };
   'app.info': { params: Record<string, never>; result: AppInfo };
   'app.ping': { params: unknown; result: { echo: unknown; uptimeMs: number } };
@@ -168,4 +200,5 @@ export interface Events {
   'engine.status': EngineInfo;
   stats: FrameStats;
   'graph.changed': { revision: number };
+  'project.changed': ProjectInfo;
 }

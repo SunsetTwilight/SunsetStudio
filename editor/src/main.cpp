@@ -10,6 +10,7 @@
 //    --devtools / STUDIO_DEVTOOLS=1          開発者ツールを使えるようにする (Debug ビルドでは常に)
 //    STUDIO_UI_DEV_URL=http://localhost:5173 Vite の開発サーバーの UI を開く (ホットリロード)
 //    --smoke-test                            UI とエンジンが動いたことを確認して終了する (自動テスト用)
+//    <ファイル>.sunsetproj                    そのプロジェクトを開いて起動する (なければ起動画面を出す)
 // ============================================================
 #include "app/EditorApp.h"
 
@@ -22,6 +23,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <shellapi.h>   // CommandLineToArgvW
 
 namespace
 {
@@ -40,18 +42,29 @@ int main(int argc, char** argv)
 	studio::EditorOptions options = studio::EditorOptions::fromEnvironment(argc, argv);
 	const std::filesystem::path exeDir = executableDir();
 	options.uiIndex = exeDir / "ui" / "index.html";
-	options.assetRoot = exeDir / "assets";
-#ifdef STUDIO_ASSET_SOURCE_DIR
-	// ビルドツリーでは、ソースの editor/assets を直接読み書きする (保存するとその場で反映され、
-	// エディターで保存した内容はソースに残る)
+	options.templateRoot = exeDir / "templates";
+#ifdef STUDIO_TEMPLATE_SOURCE_DIR
+	// ビルドツリーでは、ソースの editor/templates を使う
 	{
-		const std::string utf8 = STUDIO_ASSET_SOURCE_DIR;
+		const std::string utf8 = STUDIO_TEMPLATE_SOURCE_DIR;
 		std::error_code   ec;
 		const std::filesystem::path source(std::u8string(utf8.begin(), utf8.end()));
-		if (std::filesystem::is_directory(source / "graphs", ec))
-			options.assetRoot = source;
+		if (std::filesystem::is_directory(source, ec))
+			options.templateRoot = source;
 	}
 #endif
+	// コマンドラインのプロジェクトファイル (UTF-16 で受け取る)
+	{
+		int     wargc = 0;
+		LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+		for (int i = 1; wargv && i < wargc; ++i)
+		{
+			const std::filesystem::path a(wargv[i]);
+			if (a.extension() == L".sunsetproj")
+				options.projectFile = a;
+		}
+		LocalFree(wargv);
+	}
 
 	studio::EditorApp app(std::move(options));
 	return app.run();

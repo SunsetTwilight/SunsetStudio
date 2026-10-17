@@ -11,6 +11,7 @@
 //  ビューポート (M2b): attachViewport したウィンドウが見えていて大きさがあるあいだ、
 //  毎フレーム (vsync) シーンを描く。見えていない / 最小化のあいだは描かずに待つ。
 //  M3d: シーンはレンダーグラフ (ViewportRenderer) で描き、アセットの変更を毎フレーム反映する。
+//  M4a: シーンはプロジェクトを開いてから作る (openProject)。開いていなければ描かない。
 // ============================================================
 
 #include "OrbitCamera.h"
@@ -24,6 +25,7 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -39,7 +41,6 @@ public:
 	struct Config
 	{
 		DeviceConfig                       device;
-		std::filesystem::path              assetRoot;    // ビューポートのアセット (graphs/ pipelines/ shaders/)
 	};
 
 	struct InitResult
@@ -89,6 +90,12 @@ public:
 		post([this, task = std::move(task)](GraphicsEngine& engine) { task(engine, m_sceneOk ? &m_scene : nullptr); });
 	}
 
+	// プロジェクトのアセットでシーンを作り直す (前のシーンとシェーダーは破棄する)。
+	// done は描画スレッドから呼ばれる (ok = false なら error に理由。シーンはない状態になる)
+	void openProject(std::filesystem::path assetRoot, std::string graphFile, std::function<void(bool ok, const std::string& error)> done);
+	// シーンを破棄する (プロジェクトを閉じる)。done は描画スレッドから呼ばれる
+	void closeProject(std::function<void()> done);
+
 	// 待っている描画スレッドを起こす (ビューポートが見えるようになったときなど)
 	void wake() { m_cv.notify_one(); }
 
@@ -108,6 +115,7 @@ private:
 	void renderFrame(GraphicsEngine& engine);
 	void releaseViewport(GraphicsEngine& engine);
 	void pollAssets();
+	void closeScene(GraphicsEngine& engine);
 public:
 	// グラフが切り替わっていたら graphChanged を呼ぶ (描画スレッドから。編集の処理のあとにも呼ぶ)
 	void notifyGraph();
@@ -121,7 +129,7 @@ private:
 
 	// ---- 描画スレッドだけが触る ----
 	Callbacks       m_callbacks;
-	ShaderLibrary*  m_shaders  = nullptr;
+	std::unique_ptr<ShaderLibrary> m_shaders;   // プロジェクトごとに作り直す (検索パスを持ち越さない)
 	ViewportRenderer m_scene;
 	uint64_t        m_graphRevision = 0;
 	bool            m_sceneOk  = false;

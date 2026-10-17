@@ -9,11 +9,15 @@
 //             schema.types / schema.describe /
 //             pipeline.list / pipeline.get / pipeline.update / pipeline.save   (パイプラインのアセット)
 //             graph.get / graph.set / graph.save                               (ビューポートのレンダーグラフ)
+//             project.info / project.recent / project.templates / project.open / project.create / project.close /
+//             project.layout.get / project.layout.set / dialog.openProject / dialog.pickFolder   (プロジェクト、M4a)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
-//             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった)
+//             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった) /
+//             project.changed (プロジェクトを開いた / 閉じた)
 // ============================================================
 
 #include "host/WebHost.h"
+#include "services/Project.h"
 #include "render/RenderThread.h"
 #include "viewport/ViewportWindow.h"
 
@@ -21,6 +25,7 @@
 #include <chrono>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,7 +35,8 @@ namespace studio
 struct EditorOptions
 {
 	std::filesystem::path              uiIndex;      // 配布用の UI (<exe>/ui/index.html)
-	std::filesystem::path              assetRoot;    // ビューポートのアセット (開発時はソースの editor/assets)
+	std::filesystem::path              templateRoot; // プロジェクトのテンプレートのフォルダ (開発時はソースの editor/templates)
+	std::filesystem::path              projectFile;  // コマンドラインで渡されたプロジェクト (空なら起動画面)
 	std::string uiDevUrl;            // STUDIO_UI_DEV_URL (Vite の開発サーバー)
 	bool        devTools  = false;   // STUDIO_DEVTOOLS=1 / Debug ビルド
 	bool        software  = false;   // --software / STUDIO_ADAPTER=software (WARP)
@@ -53,6 +59,10 @@ private:
 	enum class EngineStatus { Starting, Ready, Failed };
 
 	void registerMethods();
+	void registerProjectMethods();
+	Json projectJson() const;
+	// プロジェクトを開く (UI スレッド)。結果は done に (UI スレッドから) 返す
+	void openProject(const std::filesystem::path& file, std::function<void(bool ok, const Json& result, const std::string& error)> done);
 	Json engineJson();   // m_engineMutex を取ってから呼ぶこと
 	void onEngineInit(const RenderThread::InitResult& result);
 	void onEngineMessage(GfxMessageSeverity severity, int32_t id, const std::string& text);
@@ -83,8 +93,15 @@ private:
 	bool     m_engineDone    = false;
 	bool     m_engineOk      = false;
 	uint64_t m_framesDrawn   = 0;
-	enum class SmokeStage { WaitFrames, Inspector, Graph, WaitAfter, Finished };
-	SmokeStage m_smokeStage    = SmokeStage::WaitFrames;
+	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, WaitAfter, Finished };
+	SmokeStage m_smokeStage    = SmokeStage::WaitProject;
+	bool       m_smokeProjectFailed = false;
+	std::filesystem::path m_smokeDir;   // スモークテストのプロジェクト (一時フォルダ。終了時に消す)
+
+	// プロジェクト (UI スレッドだけが触る)
+	std::optional<Project> m_project;
+	RecentProjects         m_recent { RecentProjects::defaultFile() };
+	bool                   m_projectBusy = false;
 	uint64_t   m_smokeFrameMark = 0;
 	int      m_exitCode      = 0;
 };

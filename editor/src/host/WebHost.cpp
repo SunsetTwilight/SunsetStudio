@@ -197,6 +197,12 @@ void WebHost::markReady()
 	post([this, js] { evalNow(js); });
 }
 
+void WebHost::setTitle(const std::string& title)
+{
+	if (m_webview)
+		webview_set_title(wv(m_webview), title.c_str());
+}
+
 void* WebHost::nativeWindow() const
 {
 	return m_webview ? webview_get_window(wv(m_webview)) : nullptr;

@@ -2,10 +2,11 @@
 // ============================================================
 //  editor/src/render/ViewportRenderer.h
 //
-//  ビューポートをレンダーグラフで描く (M3d)。描画の流れはすべてアセットの JSON にある:
-//    editor/assets/graphs/viewport.json   GBuffer → Lighting → Grid → Composite
-//    editor/assets/pipelines/*.json       パイプライン (シェーダー、バインディングレイアウト、ステート)
-//    editor/assets/shaders/*.hlsl         シェーダー
+//  ビューポートをレンダーグラフで描く (M3d)。描画の流れはすべて、開いたプロジェクトのアセットの JSON にある:
+//    Assets/graphs/viewport.json   GBuffer → Lighting → Grid → Composite (プロジェクトファイルの viewport.graph)
+//    Assets/pipelines/*.json       パイプライン (シェーダー、バインディングレイアウト、ステート)
+//    Assets/shaders/*.hlsl         シェーダー
+//  プロジェクトを開くたびに init し直す (M4a)。
 //  このクラスは、シーン (立方体と地面のグリッド) とフレームの定数を IDrawListProvider としてグラフに渡し、
 //  アセットの変更 (ファイルの保存、インスペクターの編集) をその場で反映する。
 //
@@ -29,10 +30,9 @@ namespace studio
 class ViewportRenderer final : public gfx::rg::IDrawListProvider
 {
 public:
-	static constexpr const char* k_GraphFile = "graphs/viewport.json";
-
-	// 失敗したら false (error に理由)
-	bool init(GraphicsEngine& engine, ShaderLibrary& shaders, const std::filesystem::path& assetRoot, std::string& error);
+	// 失敗したら false (error に理由)。graphFile は assetRoot からの相対パス
+	bool init(GraphicsEngine& engine, ShaderLibrary& shaders, const std::filesystem::path& assetRoot,
+	          const std::string& graphFile, std::string& error);
 	void shutdown(GraphicsEngine& engine);
 
 	// アセットの変更を反映する (毎フレーム)。結果はログに出す内容
@@ -55,6 +55,7 @@ public:
 	gfx::rg::Executor&              executor()  { return *m_executor; }
 	const gfx::rg::CompileOptions&  compileOptions() const { return m_options; }
 	const std::filesystem::path&    assetRoot() const { return m_root; }
+	const std::string&              graphFile() const { return m_graphFile; }
 
 	// プロジェクトのパイプラインのアセット (pipelines/*.json。区切りは "/")
 	std::vector<std::string> pipelineFiles() const;
@@ -73,6 +74,7 @@ private:
 	};
 
 	std::filesystem::path                     m_root;
+	std::string                               m_graphFile;
 	std::unique_ptr<gfx::rg::PipelineLibrary> m_pipelines;
 	std::unique_ptr<gfx::rg::Executor>        m_executor;
 	std::unique_ptr<gfx::rg::GraphAsset>      m_graph;

@@ -57,6 +57,9 @@ public:
 	// フロントエンドの準備ができた (ui.ready)。ためていたイベントを送る。UI スレッドから呼ぶ
 	void markReady();
 
+	// ウィンドウのタイトル (UI スレッドから呼ぶ)
+	void setTitle(const std::string& title);
+
 	Bridge& bridge() { return m_bridge; }
 	void*   nativeWindow() const;   // Win32 では HWND
 

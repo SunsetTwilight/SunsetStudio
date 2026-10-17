@@ -23,10 +23,12 @@ target_link_libraries(studio_bridge
     PRIVATE studio_options
 )
 
-# ---- スキーマと Bridge の JSON の橋渡し (インスペクター用。GPU / webview に依存しない) ----
+# ---- スキーマと Bridge の JSON の橋渡し、プロジェクトファイル (GPU / webview に依存しない) ----
 add_library(studio_services STATIC
     src/services/SchemaJson.h
     src/services/SchemaJson.cpp
+    src/services/Project.h            # プロジェクトファイル (.sunsetproj) と最近のプロジェクト
+    src/services/Project.cpp
 )
 target_include_directories(studio_services PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(studio_services
@@ -41,6 +43,8 @@ add_executable(SunsetEditor
     src/app/EditorApp.cpp
     src/host/WebHost.h
     src/host/WebHost.cpp
+    src/host/FileDialog.h
+    src/host/FileDialog_win32.cpp
     src/render/RenderThread.h
     src/render/RenderThread.cpp
     src/render/OrbitCamera.h
@@ -67,21 +71,28 @@ target_compile_definitions(SunsetEditor PRIVATE
     NOMINMAX
 )
 
-# ---- ビューポートのアセット (レンダーグラフ、パイプライン、シェーダー) ----
-# editor/assets を bin/assets にコピーする (配布用)。ビルドツリーの exe はソースのフォルダを直接読み書きするので、
-# 保存するとその場で反映され、エディターで保存した内容はソースに残る
-file(GLOB_RECURSE STUDIO_EDITOR_ASSETS CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/*.json" "${CMAKE_CURRENT_SOURCE_DIR}/assets/*.hlsl*")
-target_sources(SunsetEditor PRIVATE ${STUDIO_EDITOR_ASSETS})
-set_source_files_properties(${STUDIO_EDITOR_ASSETS} PROPERTIES HEADER_FILE_ONLY TRUE)
-add_custom_target(studio_editor_assets ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "${CMAKE_BINARY_DIR}/bin/assets"
-    COMMENT "Copying editor assets to bin/assets"
+# ---- プロジェクトのテンプレート (M4a) ----
+# editor/templates/<名前>/ の中身が、新しいプロジェクトの Assets/ になる (graphs/ pipelines/ shaders/)。
+# bin/templates にコピーする (配布用)。ビルドツリーの exe はソースのフォルダを使う
+file(GLOB_RECURSE STUDIO_EDITOR_TEMPLATES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/templates/*.json" "${CMAKE_CURRENT_SOURCE_DIR}/templates/*.hlsl*")
+target_sources(SunsetEditor PRIVATE ${STUDIO_EDITOR_TEMPLATES})
+set_source_files_properties(${STUDIO_EDITOR_TEMPLATES} PROPERTIES HEADER_FILE_ONLY TRUE)
+add_custom_target(studio_editor_templates ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/templates" "${CMAKE_BINARY_DIR}/bin/templates"
+    COMMENT "Copying project templates to bin/templates"
     VERBATIM
 )
-add_dependencies(SunsetEditor studio_editor_assets)
+add_dependencies(SunsetEditor studio_editor_templates)
+# エンジンのバージョン ("v0.3.0" → "0.3")。プロジェクトファイルの engine に書き、開くときに比べる
+string(REGEX MATCH "^v?([0-9]+)\\.([0-9]+)" _studio_gfx_ver "${STUDIO_GFX_TAG}")
+set(STUDIO_GFX_VERSION "")
+if(_studio_gfx_ver)
+    set(STUDIO_GFX_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
+endif()
 target_compile_definitions(SunsetEditor PRIVATE
-    "STUDIO_ASSET_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets\"")
+    "STUDIO_TEMPLATE_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/templates\""
+    "STUDIO_GFX_VERSION=\"${STUDIO_GFX_VERSION}\"")
 
 # 本体 DLL / バックエンド DLL / dxcompiler.dll / dxil.dll を exe の横に配置する
 sunset_gfx_deploy_runtime(SunsetEditor)
@@ -92,7 +103,7 @@ set_target_properties(SunsetEditor PROPERTIES
 
 include(GNUInstallDirs)
 install(TARGETS SunsetEditor RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(DIRECTORY assets DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(DIRECTORY templates DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 # ---- フロントエンド ----
 include(StudioFrontend)

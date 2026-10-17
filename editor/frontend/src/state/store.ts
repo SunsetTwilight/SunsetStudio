@@ -3,7 +3,7 @@
 //  パネルは dockview の中で別々に描かれるので、props ではなくここから読む (useStudio)。
 // ============================================================
 import { useSyncExternalStore } from 'react';
-import type { AppInfo, EngineInfo, FrameStats, GraphInfo, LogEntry } from '../bridge/protocol';
+import type { AppInfo, EngineInfo, FrameStats, GraphInfo, LogEntry, ProjectInfo } from '../bridge/protocol';
 
 // インスペクターに表示するもの (グラフのパネルで選ぶ)
 export type Selection =
@@ -19,11 +19,12 @@ export interface StudioState {
   connError: string | null;
   graph: GraphInfo | null;
   selection: Selection | null;
+  project: ProjectInfo | null; // null = まだ問い合わせていない
 }
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -49,6 +50,13 @@ export const studioStore = {
   clearLogs: () => set({ logs: [] }),
   setGraph: (graph: GraphInfo) => set({ graph }),
   select: (selection: Selection | null) => set({ selection }),
+  // プロジェクトが変わったら、前のプロジェクトのグラフと選択と統計は捨てる
+  setProject: (project: ProjectInfo) =>
+    set(
+      state.project?.file === project.file && state.project?.open === project.open
+        ? { project }
+        : { project, graph: null, selection: null, stats: null },
+    ),
 };
 
 export function useStudio<T>(select: (s: StudioState) => T): T {
