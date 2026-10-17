@@ -25,7 +25,7 @@ include(FetchContent)
 # ※ ブランチを指定した場合、URL が変わらないので 2 回目以降は再ダウンロードされない。
 #    最新を取り込むには build/<preset>/_deps を削除するか --fresh で構成し直す。
 set(STUDIO_GITHUB_OWNER "SunsetTwilight" CACHE STRING "自作ライブラリの GitHub のオーナー")
-set(STUDIO_GFX_TAG      "v0.2.0"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
+set(STUDIO_GFX_TAG      "v0.2.1"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
 set(STUDIO_MATHLIB_TAG  "v0.1.0"         CACHE STRING "SunsetMathLib のタグ / ブランチ / コミット")
 set(STUDIO_GFX_URL      "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetGraphicsEngine/archive/${STUDIO_GFX_TAG}.tar.gz"
     CACHE STRING "SunsetGraphicsEngine の取得元 (アーカイブの URL)")

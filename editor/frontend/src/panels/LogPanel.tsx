@@ -2,7 +2,8 @@
 //  ログのパネル: エンジンのデバッグメッセージ (シェーダーのエラー、D3D12 の検証) とアプリのメッセージ
 // ============================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { LogEntry, LogLevel } from '../bridge/protocol';
+import type { LogLevel } from '../bridge/protocol';
+import { studioStore, useStudio } from '../state/store';
 
 const LEVELS: LogLevel[] = ['error', 'warning', 'info'];
 const LEVEL_LABEL: Record<LogLevel, string> = { error: 'エラー', warning: '警告', info: '情報' };
@@ -12,7 +13,8 @@ function formatTime(ms: number): string {
   return s.toFixed(3).padStart(8, ' ');
 }
 
-export function LogPanel({ entries, onClear }: { entries: LogEntry[]; onClear: () => void }) {
+export function LogPanel() {
+  const entries = useStudio((s) => s.logs);
   const [enabled, setEnabled] = useState<Record<LogLevel, boolean>>({ error: true, warning: true, info: true });
   const [query, setQuery] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
@@ -40,7 +42,6 @@ export function LogPanel({ entries, onClear }: { entries: LogEntry[]; onClear: (
   return (
     <section className="panel log-panel">
       <header className="panel-header">
-        <span className="panel-title">ログ</span>
         {LEVELS.map((level) => (
           <label key={level} className={`log-toggle level-${level}`}>
             <input
@@ -57,7 +58,7 @@ export function LogPanel({ entries, onClear }: { entries: LogEntry[]; onClear: (
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <button onClick={onClear}>クリア</button>
+        <button onClick={studioStore.clearLogs}>クリア</button>
       </header>
       <div
         className="log-list"

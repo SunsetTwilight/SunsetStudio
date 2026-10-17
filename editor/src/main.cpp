@@ -38,7 +38,19 @@ std::filesystem::path executableDir()
 int main(int argc, char** argv)
 {
 	studio::EditorOptions options = studio::EditorOptions::fromEnvironment(argc, argv);
-	options.uiIndex = executableDir() / "ui" / "index.html";
+	const std::filesystem::path exeDir = executableDir();
+	options.uiIndex = exeDir / "ui" / "index.html";
+#ifdef STUDIO_SHADER_SOURCE_DIR
+	// ビルドツリーでは、ソースの editor/shaders を直接読む (保存するとその場で反映される)
+	{
+		const std::string utf8 = STUDIO_SHADER_SOURCE_DIR;
+		std::error_code   ec;
+		const std::filesystem::path source(std::u8string(utf8.begin(), utf8.end()));
+		if (std::filesystem::is_directory(source, ec))
+			options.shaderDirs.push_back(source);
+	}
+#endif
+	options.shaderDirs.push_back(exeDir / "shaders");
 
 	studio::EditorApp app(std::move(options));
 	return app.run();

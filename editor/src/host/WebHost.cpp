@@ -7,6 +7,9 @@
 #define WEBVIEW_HEADER
 #include "webview/webview.h"
 
+#include <windows.h>
+#include <commctrl.h>
+
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -197,5 +200,36 @@ void WebHost::markReady()
 void* WebHost::nativeWindow() const
 {
 	return m_webview ? webview_get_window(wv(m_webview)) : nullptr;
+}
+
+void WebHost::setCloseHandler(CloseHandler handler)
+{
+	m_closeHandler = std::move(handler);
+	HWND top = static_cast<HWND>(nativeWindow());
+	if (top)
+		SetWindowSubclass(top,
+			reinterpret_cast<SUBCLASSPROC>(&WebHost::topLevelSubclass), 1, reinterpret_cast<DWORD_PTR>(this));
+}
+
+intptr_t __stdcall WebHost::topLevelSubclass(void* hwnd, unsigned msg, uintptr_t wp, intptr_t lp, uintptr_t /*id*/, uintptr_t ref)
+{
+	auto* self = reinterpret_cast<WebHost*>(ref);
+	HWND  h    = static_cast<HWND>(hwnd);
+	if (msg == WM_CLOSE && self->m_closeHandler && !self->m_closeApproved)
+	{
+		// 後片付け (描画スレッドのスワップチェーンの解放など) が終わってから閉じる
+		if (!self->m_closePending)
+		{
+			self->m_closePending = true;
+			self->m_closeHandler([self, h] {
+				self->m_closeApproved = true;
+				PostMessageW(h, WM_CLOSE, 0, 0);
+			});
+		}
+		return 0;
+	}
+	if (msg == WM_NCDESTROY)
+		RemoveWindowSubclass(h, reinterpret_cast<SUBCLASSPROC>(&WebHost::topLevelSubclass), 1);
+	return DefSubclassProc(h, msg, wp, lp);
 }
 } // namespace studio

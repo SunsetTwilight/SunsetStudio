@@ -2,32 +2,37 @@
 // ============================================================
 //  editor/src/app/EditorApp.h
 //
-//  エディター全体の寿命。UI スレッド (main) で WebHost を動かし、描画スレッドでエンジンを動かす。
-//  JS から呼べるメソッド (Bridge) と、JS に送るイベントをここで登録する。
+//  エディター全体の寿命。UI スレッド (main) で WebHost とビューポートのウィンドウを動かし、
+//  描画スレッドでエンジンを動かす。JS から呼べるメソッド (Bridge) と、JS に送るイベントをここで登録する。
 //
-//  M2a のメソッド:  ui.ready / app.info / app.ping
-//  M2a のイベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果)
+//  メソッド:  ui.ready / app.info / app.ping / viewport.setRect
+//  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) / stats (フレーム時間)
 // ============================================================
 
 #include "host/WebHost.h"
 #include "render/RenderThread.h"
+#include "viewport/ViewportWindow.h"
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace studio
 {
 // 起動時の設定 (コマンドラインと環境変数から作る)
 struct EditorOptions
 {
-	std::filesystem::path uiIndex;   // 配布用の UI (<exe>/ui/index.html)
+	std::filesystem::path              uiIndex;      // 配布用の UI (<exe>/ui/index.html)
+	std::vector<std::filesystem::path> shaderDirs;   // ビューポートのシェーダー (開発時はソースのフォルダを先に)
 	std::string uiDevUrl;            // STUDIO_UI_DEV_URL (Vite の開発サーバー)
 	bool        devTools  = false;   // STUDIO_DEVTOOLS=1 / Debug ビルド
 	bool        software  = false;   // --software / STUDIO_ADAPTER=software (WARP)
-	bool        smokeTest = false;   // --smoke-test: UI とエンジンが動いたら終了する (自動テスト用)
+	bool        smokeTest = false;   // --smoke-test: UI とエンジンとビューポートが動いたら終了する (自動テスト用)
 	int         smokeTimeoutSec = 60;
+	uint64_t    smokeFrames     = 30;   // スモークテストで描けたことにするフレーム数
 
 	static EditorOptions fromEnvironment(int argc, char** argv);
 };
@@ -47,27 +52,32 @@ private:
 	Json engineJson();   // m_engineMutex を取ってから呼ぶこと
 	void onEngineInit(const RenderThread::InitResult& result);
 	void onEngineMessage(GfxMessageSeverity severity, int32_t id, const std::string& text);
+	void onStats(const RenderThread::FrameStats& stats);
 
 	// UI の log パネルと stderr に出す (どのスレッドからでもよい)
 	void log(const char* level, const char* source, const std::string& text, int32_t id = 0);
 
 	void checkSmokeTest();   // UI スレッドから呼ぶ
 
-	EditorOptions m_options;
-	WebHost       m_host;
-	RenderThread  m_render;
+	EditorOptions  m_options;
+	WebHost        m_host;       // 破棄の順: 描画スレッド → ビューポート → WebView
+	ViewportWindow m_viewport;
+	RenderThread   m_render;
 	std::chrono::steady_clock::time_point m_startTime = std::chrono::steady_clock::now();
 
-	std::mutex                 m_engineMutex;
-	EngineStatus               m_engineStatus = EngineStatus::Starting;
-	RenderThread::InitResult   m_engineInfo;
+	std::mutex               m_engineMutex;
+	EngineStatus             m_engineStatus = EngineStatus::Starting;
+	RenderThread::InitResult m_engineInfo;
+
+	std::atomic<uint32_t> m_d3dProblems { 0 };   // D3D12 のエラー / 警告の数 (スモークテストで確認する)
 
 	// スモークテストの進み具合 (UI スレッドだけが触る)
-	bool m_uiReady       = false;
-	bool m_infoRequested = false;
-	bool m_engineDone    = false;
-	bool m_engineOk      = false;
-	bool m_smokeFinished = false;
-	int  m_exitCode      = 0;
+	bool     m_uiReady       = false;
+	bool     m_infoRequested = false;
+	bool     m_engineDone    = false;
+	bool     m_engineOk      = false;
+	uint64_t m_framesDrawn   = 0;
+	bool     m_smokeFinished = false;
+	int      m_exitCode      = 0;
 };
 } // namespace studio

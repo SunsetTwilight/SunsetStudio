@@ -3,6 +3,8 @@
 // ============================================================
 #include "EditorApp.h"
 
+#include <algorithm>
+#include <cmath>
 #include <condition_variable>
 #include <cstdlib>
 #include <iostream>
@@ -94,18 +96,34 @@ int EditorApp::run()
 		std::cerr << "[SunsetEditor] " << error << "\n";
 		return 1;
 	}
+	if (!m_viewport.create(m_host.nativeWindow()))
+	{
+		std::cerr << "[SunsetEditor] ビューポートのウィンドウを作れませんでした\n";
+		return 1;
+	}
 	registerMethods();
 
 	// ---- エンジン (描画スレッド) ----
-	DeviceConfig cfg;
-	cfg.appName = "SunsetEditor";
-	cfg.adapter = m_options.software ? GfxAdapterType::Software : GfxAdapterType::Hardware;
+	RenderThread::Config renderConfig;
+	renderConfig.device.appName = "SunsetEditor";
+	renderConfig.device.adapter = m_options.software ? GfxAdapterType::Software : GfxAdapterType::Hardware;
 #ifdef STUDIO_GFX_VALIDATION
-	cfg.validation = true;
+	renderConfig.device.validation = true;
 #endif
-	m_render.start(cfg,
-		[this](GfxMessageSeverity s, int32_t id, const std::string& text) { onEngineMessage(s, id, text); },
-		[this](const RenderThread::InitResult& r) { onEngineInit(r); });
+	renderConfig.shaderDirs = m_options.shaderDirs;
+
+	RenderThread::Callbacks callbacks;
+	callbacks.message = [this](GfxMessageSeverity s, int32_t id, const std::string& text) { onEngineMessage(s, id, text); };
+	callbacks.init    = [this](const RenderThread::InitResult& r) { onEngineInit(r); };
+	callbacks.stats   = [this](const RenderThread::FrameStats& st) { onStats(st); };
+	callbacks.log     = [this](const std::string& level, const std::string& text) { log(level.c_str(), "viewport", text); };
+	m_render.start(renderConfig, std::move(callbacks));
+	m_render.attachViewport(&m_viewport);
+
+	// ×ボタンで閉じるときは、ビューポートのスワップチェーンを先に解放してからウィンドウを閉じる
+	m_host.setCloseHandler([this](std::function<void()> proceed) {
+		m_render.detachViewport([this, proceed] { m_host.post(proceed); });
+	});
 
 	// ---- UI ----
 	if (!m_host.loadUi(m_options.uiIndex, m_options.uiDevUrl, error))
@@ -132,7 +150,7 @@ int EditorApp::run()
 			if (!watchdogCv.wait_for(lock, std::chrono::seconds(m_options.smokeTimeoutSec), [&] { return finished; }))
 				m_host.post([this] {
 					std::cerr << "[SunsetEditor] smoke test: 時間切れ (ui.ready=" << m_uiReady << ", app.info=" << m_infoRequested
-					          << ", engine=" << m_engineDone << ")\n";
+					          << ", engine=" << m_engineDone << ", frames=" << m_framesDrawn << ")\n";
 					m_exitCode = 2;
 					m_host.terminate();
 				});
@@ -150,8 +168,9 @@ int EditorApp::run()
 		watchdogCv.notify_one();
 		watchdog.join();
 	}
-	// エンジンを終了してから WebView を破棄する (描画スレッドからの返答が WebView を使わないように)
+	// エンジン (とスワップチェーン) を終了してから、ビューポートのウィンドウと WebView を破棄する
 	m_render.stop();
+	m_viewport.destroy();
 	return m_exitCode;
 }
 
@@ -183,6 +202,20 @@ void EditorApp::registerMethods()
 		});
 		m_infoRequested = true;
 		checkSmokeTest();
+	});
+
+	// ビューポートの矩形 (WebView のクライアント座標の CSS px) と devicePixelRatio。
+	// 物理ピクセルに直して子ウィンドウを動かす。描画スレッドはその大きさに合わせてスワップチェーンを作り直す
+	b.registerMethod("viewport.setRect", [this](const Json& p, Bridge::Reply r) {
+		const double dpr     = p.value("dpr", 1.0);
+		const bool   visible = p.value("visible", true);
+		const int x  = static_cast<int>(std::lround(p.at("x").get<double>() * dpr));
+		const int y  = static_cast<int>(std::lround(p.at("y").get<double>() * dpr));
+		const int x2 = static_cast<int>(std::lround((p.at("x").get<double>() + p.at("width").get<double>()) * dpr));
+		const int y2 = static_cast<int>(std::lround((p.at("y").get<double>() + p.at("height").get<double>()) * dpr));
+		m_viewport.setRect(x, y, std::max(0, x2 - x), std::max(0, y2 - y), visible);
+		m_render.wake();
+		r.ok({ { "width", m_viewport.width() }, { "height", m_viewport.height() }, { "visible", m_viewport.visible() } });
 	});
 
 	// 疎通の確認。params をそのまま返す
@@ -234,7 +267,28 @@ void EditorApp::onEngineInit(const RenderThread::InitResult& result)
 
 void EditorApp::onEngineMessage(GfxMessageSeverity severity, int32_t id, const std::string& text)
 {
+	// D3D12 のデバッグレイヤーのエラー / 警告 (id >= 0)。スモークテストでは 0 件であることを確認する
+	if (id >= 0 && severity <= GfxMessageSeverity::Warning)
+		++m_d3dProblems;
 	log(severityName(severity), sourceName(id), text, id);
+}
+
+void EditorApp::onStats(const RenderThread::FrameStats& s)
+{
+	// 描画スレッドから呼ばれる
+	m_host.emit("stats", {
+		{ "fps",     s.fps },
+		{ "frameMs", s.frameMs },
+		{ "cpuMs",   s.cpuMs },
+		{ "width",   s.width },
+		{ "height",  s.height },
+		{ "frames",  s.frames },
+	});
+	const uint64_t frames = s.frames;
+	m_host.post([this, frames] {
+		m_framesDrawn = frames;
+		checkSmokeTest();
+	});
 }
 
 void EditorApp::log(const char* level, const char* source, const std::string& text, int32_t id)
@@ -248,9 +302,20 @@ void EditorApp::checkSmokeTest()
 {
 	if (!m_options.smokeTest || m_smokeFinished || !m_uiReady || !m_infoRequested || !m_engineDone)
 		return;
+	// エンジンが動いたなら、ビューポートが描けるまで待つ
+	if (m_engineOk && m_framesDrawn < m_options.smokeFrames)
+		return;
 	m_smokeFinished = true;
-	std::cerr << "[SunsetEditor] smoke test: " << (m_engineOk ? "OK" : "エンジンの初期化に失敗") << "\n";
-	m_exitCode = m_engineOk ? 0 : 4;
+	const uint32_t problems = m_d3dProblems.load();
+	if (!m_engineOk)
+		m_exitCode = 4;
+	else if (problems > 0)
+		m_exitCode = 5;
+	else
+		m_exitCode = 0;
+	std::cerr << "[SunsetEditor] smoke test: "
+	          << (m_exitCode == 0 ? "OK" : m_exitCode == 4 ? "エンジンの初期化に失敗" : "D3D12 のエラー / 警告がある")
+	          << " (frames=" << m_framesDrawn << ", d3d12=" << problems << ")\n";
 	// すでに UI スレッドのキューに積んだイベントを送ってから閉じる
 	m_host.post([this] { m_host.terminate(); });
 }

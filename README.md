@@ -4,7 +4,7 @@
 
 どちらのライブラリも単独で使えるように作られています。このリポジトリはそれらを使う側で、ライブラリのコードは含みません。
 
-> **現在の状態**: M2a(エディターの骨格)。`SunsetEditor` は webview のウィンドウに Web UI(React)を表示し、描画スレッドでエンジンを初期化して、エンジンのメッセージを UI のログに表示します。3D ビューポートは M2b、インスペクターは M2c で入ります。
+> **現在の状態**: M2b(3D ビューポート)。`SunsetEditor` は webview のウィンドウに Web UI(React、ドッキングできるパネル)を表示し、ビューポートのパネルにエンジンの描画(ネイティブの子ウィンドウ)を重ねます。エンジンのメッセージはログのパネルに、フレームの統計はステータスバーに出ます。インスペクターは M2c で入ります。
 > 設計: [docs/design/editor-shell.md](docs/design/editor-shell.md)(エディターの骨格)、SunsetGraphicsEngine の [docs/design/editor-architecture.md](../SunsetGraphicsEngine/docs/design/editor-architecture.md)(全体)
 
 ---
@@ -25,8 +25,11 @@ SunsetStudio/
 │   │   ├── app/EditorApp.*      ← 全体の寿命、JS から呼べるメソッドとイベント
 │   │   ├── host/WebHost.*       ← webview の包み (UI スレッド)
 │   │   ├── host/Bridge.*        ← JS → C++ の RPC (webview に依存しない)
-│   │   └── render/RenderThread.* ← エンジンを持つ描画スレッド
-│   └── frontend/               ← UI (React + TypeScript + Vite)
+│   │   ├── render/RenderThread.* ← エンジンを持つ描画スレッド (ビューポートのフレームのループ)
+│   │   ├── render/SceneRenderer.* ← ビューポートのシーン
+│   │   └── viewport/ViewportWindow* ← ビューポートの子ウィンドウとマウスの入力
+│   ├── shaders/                ← ビューポートのシェーダー (編集するとその場で反映される)
+│   └── frontend/               ← UI (React + TypeScript + Vite + dockview)
 ├── tests/                      ← 結合テスト、Bridge の単体テスト、エディターのスモークテスト (doctest)
 ├── docs/design/                ← 設計ドキュメント
 └── .github/workflows/ci.yml    ← GitHub Actions
@@ -51,7 +54,7 @@ SunsetGraphicsEngineProject/
 | SunsetMathLib | — | `MathLib::MathLib` | 同上 |
 | webview/webview 0.12.0 | MIT | `webview::core_static` | アーカイブを URL で取得 (SHA256 で固定)。Windows では configure 時に NuGet から WebView2 SDK のヘッダーを取得する |
 | nlohmann/json 3.12.0 | MIT | `nlohmann_json::nlohmann_json` | アーカイブを URL で取得 (SHA256 で固定) |
-| React / Vite / TypeScript など | MIT / Apache-2.0 | `editor/frontend/package.json` | npm (`package-lock.json` で固定) |
+| React / Vite / TypeScript / dockview など | MIT / Apache-2.0 | `editor/frontend/package.json` | npm (`package-lock.json` で固定) |
 
 エンジンの DLL(`SunsetGraphicsEngine.dll`、`gfx_dx12.dll`、`dxcompiler.dll`、`dxil.dll`)は、`sunset_gfx_deploy_runtime()` がビルド時に exe の横にコピーします。DXC はエンジンが configure 時に取得します。
 
@@ -88,7 +91,7 @@ cmake --build --preset windows-debug
 
 | 変数 | 既定値 | 内容 |
 |------|--------|------|
-| `STUDIO_GFX_TAG` | `v0.2.0` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
+| `STUDIO_GFX_TAG` | `v0.2.1` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
 | `STUDIO_MATHLIB_TAG` | `v0.1.0` | SunsetMathLib のタグ / ブランチ / コミット |
 | `STUDIO_GITHUB_OWNER` | `SunsetTwilight` | GitHub のオーナー |
 | `STUDIO_GFX_URL` / `STUDIO_MATHLIB_URL` | 上から組み立てた URL | 取得元を直接指定する場合 |
@@ -132,6 +135,10 @@ set STUDIO_UI_DEV_URL=http://localhost:5173
 build\windows-dev-debug\bin\SunsetEditor.exe
 ```
 
+ビューポートの操作: 左ドラッグで回転、中 / 右ドラッグで平行移動、ホイールでズーム、F キーで視点を戻す。
+`editor/shaders/*.hlsl` を保存すると、実行中のビューポートにその場で反映されます (ビルドツリーの exe はソースのフォルダを読みます)。
+パネルはタブをドラッグして移動 / 分割できます。ビューポートの上には Web の UI を重ねられないため、ドラッグ中はビューポートを隠します。
+
 C++ と JS の間のメソッドとイベントの型は `editor/frontend/src/bridge/protocol.ts`、C++ 側の登録は `editor/src/app/EditorApp.cpp` にあります。
 
 ---
@@ -142,7 +149,7 @@ C++ と JS の間のメソッドとイベントの型は `editor/frontend/src/br
 |-------|------|-----------|
 | `integration` | エンジンの DLL の配置と初期化、MathLib、スキーマ | GPU または WARP |
 | `unit` | Bridge (RPC) の単体テスト | なし |
-| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info` とエンジンの初期化を確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
+| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートが 30 フレーム描けて D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
 
 ```bat
 ctest --test-dir build\windows-dev-debug --output-on-failure

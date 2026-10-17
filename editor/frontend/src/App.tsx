@@ -1,68 +1,101 @@
 // ============================================================
-//  SunsetEditor の画面 (M2a: 骨格)
+//  SunsetEditor の画面
 //
-//    ┌ ツールバー ─────────────────────────────────────┐
-//    │ アウトライナー │ ビューポート (M2b)  │ インスペクター (M2c) │
-//    ├────────────────────────────────────────────────┤
-//    │ ログ                                              │
-//    └ ステータスバー (エンジンの状態) ─────────────────┘
+//    ┌ ツールバー ───────────────────────────────────────┐
+//    │ dockview: アウトライナー │ ビューポート │ インスペクター  │
+//    │           ログ (ビューポートの下)                       │
+//    └ ステータスバー (エンジンの状態、フレームの統計) ──────┘
+//
+//  パネルはドラッグで移動 / 分割 / タブにできる (dockview)。
+//  ビューポートの上には C++ の子ウィンドウが重なる (ViewportPanel)。
 // ============================================================
 import { useCallback, useEffect, useState } from 'react';
+import { DockviewReact, themeDark, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview-react';
+import 'dockview-react/dist/styles/dockview.css';
 import { call, installEventSink, isConnected, on, StudioError } from './bridge/client';
-import { PROTOCOL_VERSION, type AppInfo, type EngineInfo, type LogEntry } from './bridge/protocol';
+import { PROTOCOL_VERSION, type EngineInfo } from './bridge/protocol';
 import { LogPanel } from './panels/LogPanel';
+import { ViewportPanel } from './panels/ViewportPanel';
+import { studioStore, useStudio } from './state/store';
 
-const MAX_LOG_ENTRIES = 5000;
+function Placeholder({ text }: { text: string }) {
+  return (
+    <div className="panel">
+      <div className="placeholder">{text}</div>
+    </div>
+  );
+}
+
+const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
+  viewport: () => <ViewportPanel />,
+  outliner: () => <Placeholder text="シーンとレンダーグラフ (M3 以降)" />,
+  inspector: () => <Placeholder text="記述子のフォーム (M2c)" />,
+  log: () => <LogPanel />,
+};
+
+// 初期のレイアウト
+function onReady(event: DockviewReadyEvent) {
+  const api = event.api;
+  api.addPanel({ id: 'viewport', component: 'viewport', title: 'ビューポート' });
+  api.addPanel({
+    id: 'outliner',
+    component: 'outliner',
+    title: 'アウトライナー',
+    position: { referencePanel: 'viewport', direction: 'left' },
+    initialWidth: 240,
+  });
+  api.addPanel({
+    id: 'inspector',
+    component: 'inspector',
+    title: 'インスペクター',
+    position: { referencePanel: 'viewport', direction: 'right' },
+    initialWidth: 320,
+  });
+  api.addPanel({
+    id: 'log',
+    component: 'log',
+    title: 'ログ',
+    position: { referencePanel: 'viewport', direction: 'below' },
+    initialHeight: 220,
+  });
+  api.getPanel('viewport')?.api.setActive();
+}
 
 export function App() {
-  const [info, setInfo] = useState<AppInfo | null>(null);
-  const [engine, setEngine] = useState<EngineInfo | null>(null);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [connError, setConnError] = useState<string | null>(null);
+  const connError = useStudio((s) => s.connError);
   const [ping, setPing] = useState<string>('');
 
-  const addLog = useCallback((entry: LogEntry) => {
-    setLogs((prev) => {
-      const next = prev.length >= MAX_LOG_ENTRIES ? prev.slice(prev.length - MAX_LOG_ENTRIES + 1) : prev.slice();
-      next.push(entry);
-      return next;
-    });
-  }, []);
-
   useEffect(() => {
-    const offLog = on('log', addLog);
-    const offEngine = on('engine.status', setEngine);
+    const offLog = on('log', studioStore.addLog);
+    const offEngine = on('engine.status', studioStore.setEngine);
+    const offStats = on('stats', studioStore.setStats);
     installEventSink();
+    const off = () => {
+      offLog();
+      offEngine();
+      offStats();
+    };
 
     if (!isConnected()) {
-      setConnError('エディターに接続されていません。SunsetEditor の中で開いてください (STUDIO_UI_DEV_URL)。');
-      return () => {
-        offLog();
-        offEngine();
-      };
+      studioStore.setConnError('エディターに接続されていません。SunsetEditor の中で開いてください (STUDIO_UI_DEV_URL)。');
+      return off;
     }
 
     (async () => {
       try {
         const ready = await call('ui.ready');
         if (ready.protocol !== PROTOCOL_VERSION) {
-          setConnError(`プロトコルのバージョンが違います (UI ${PROTOCOL_VERSION}, エディター ${ready.protocol})`);
+          studioStore.setConnError(`プロトコルのバージョンが違います (UI ${PROTOCOL_VERSION}, エディター ${ready.protocol})`);
         }
-        const appInfo = await call('app.info');
-        setInfo(appInfo);
-        setEngine((current) => current ?? appInfo.engine);
+        studioStore.setInfo(await call('app.info'));
       } catch (e) {
-        setConnError(e instanceof StudioError ? `${e.message} (${e.code})` : String(e));
+        studioStore.setConnError(e instanceof StudioError ? `${e.message} (${e.code})` : String(e));
       }
     })();
+    return off;
+  }, []);
 
-    return () => {
-      offLog();
-      offEngine();
-    };
-  }, [addLog]);
-
-  const doPing = async () => {
+  const doPing = useCallback(async () => {
     const t0 = performance.now();
     try {
       await call('app.ping', { t: t0 });
@@ -70,57 +103,51 @@ export function App() {
     } catch (e) {
       setPing(String(e));
     }
-  };
+  }, []);
 
   return (
     <div className="app">
       <header className="toolbar">
         <span className="brand">SunsetEditor</span>
         <span className="spacer" />
-        <button onClick={doPing} disabled={!isConnected()}>Ping</button>
+        <span className="muted hint">ビューポート: 左ドラッグで回転 / 右・中ドラッグで移動 / ホイールでズーム / F で視点を戻す</span>
+        <button onClick={doPing} disabled={!isConnected()}>
+          Ping
+        </button>
         {ping && <span className="muted">{ping}</span>}
       </header>
 
       {connError && <div className="banner error">{connError}</div>}
 
       <main className="workspace">
-        <section className="panel outliner">
-          <header className="panel-header">
-            <span className="panel-title">アウトライナー</span>
-          </header>
-          <div className="placeholder">シーンとレンダーグラフ (M3 以降)</div>
-        </section>
-
-        <section className="panel viewport-panel">
-          <header className="panel-header">
-            <span className="panel-title">ビューポート</span>
-          </header>
-          {/* M2b: この要素の矩形にエンジンの子ウィンドウを重ねる */}
-          <div className="viewport" data-viewport>
-            <div className="placeholder">3D ビューポート (M2b)</div>
-          </div>
-        </section>
-
-        <section className="panel inspector">
-          <header className="panel-header">
-            <span className="panel-title">インスペクター</span>
-          </header>
-          <div className="placeholder">記述子のフォーム (M2c)</div>
-        </section>
-
-        <LogPanel entries={logs} onClear={() => setLogs([])} />
+        <DockviewReact components={components} onReady={onReady} theme={themeDark} />
       </main>
 
-      <footer className="statusbar">
-        <EngineStatus engine={engine} />
-        <span className="spacer" />
-        {info && (
-          <span className="muted">
-            {info.app} {info.version} · protocol {info.protocol} · ABI {engine?.abi ?? info.engine.abi}
-          </span>
-        )}
-      </footer>
+      <StatusBar />
     </div>
+  );
+}
+
+function StatusBar() {
+  const info = useStudio((s) => s.info);
+  const engine = useStudio((s) => s.engine);
+  const stats = useStudio((s) => s.stats);
+  return (
+    <footer className="statusbar">
+      <EngineStatus engine={engine} />
+      {stats && (
+        <span className="muted">
+          {stats.fps.toFixed(0)} fps · {stats.frameMs.toFixed(2)} ms (CPU {stats.cpuMs.toFixed(2)} ms) · {stats.width}×
+          {stats.height}
+        </span>
+      )}
+      <span className="spacer" />
+      {info && (
+        <span className="muted">
+          {info.app} {info.version} · protocol {info.protocol} · ABI {engine?.abi ?? info.engine.abi}
+        </span>
+      )}
+    </footer>
   );
 }
 

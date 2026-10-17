@@ -60,7 +60,13 @@ public:
 	Bridge& bridge() { return m_bridge; }
 	void*   nativeWindow() const;   // Win32 では HWND
 
+	// ウィンドウを閉じる操作 (×ボタンなど) のときに呼ぶ。handler は後片付けを始め、
+	// 終わったら proceed を UI スレッドで呼ぶ (呼ぶとウィンドウが閉じる)。UI スレッドから設定すること
+	using CloseHandler = std::function<void(std::function<void()> proceed)>;
+	void setCloseHandler(CloseHandler handler);
+
 private:
+	static intptr_t __stdcall topLevelSubclass(void* hwnd, unsigned msg, uintptr_t wp, intptr_t lp, uintptr_t id, uintptr_t ref);
 	void evalNow(const std::string& js);
 	static void dispatchTrampoline(void* w, void* arg);
 
@@ -70,5 +76,8 @@ private:
 	std::mutex               m_eventMutex;
 	bool                     m_ready = false;
 	std::vector<std::string> m_pendingEvents;       // ready 前のイベント (JS のコード)
+	CloseHandler             m_closeHandler;
+	bool                     m_closeApproved = false;
+	bool                     m_closePending  = false;
 };
 } // namespace studio

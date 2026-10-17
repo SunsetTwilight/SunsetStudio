@@ -58,9 +58,11 @@ input {
   padding: 1px 6px;
 }
 
+/* 縦に並べ、パネルの領域 (.workspace) が残りをすべて使う
+   (エラーの帯は出たり出なかったりするので、行の数を決め打ちする grid は使わない) */
 .app {
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   height: 100%;
 }
 
@@ -98,35 +100,35 @@ input {
 }
 
 .workspace {
-  display: grid;
-  grid-template-columns: 240px 1fr 320px;
-  grid-template-rows: 1fr 220px;
-  grid-template-areas:
-    'outliner viewport inspector'
-    'log log log';
-  gap: 1px;
-  background: var(--border);
+  position: relative;
+  flex: 1;
   min-height: 0;
+}
+.workspace > * {
+  height: 100%;
+}
+
+/* dockview の配色をエディターに合わせる */
+.workspace .dockview-theme-dark {
+  --dv-group-view-background-color: var(--panel);
+  --dv-tabs-and-actions-container-background-color: var(--panel-header);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--panel);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--panel);
+  --dv-separator-border: var(--border);
+  --dv-paneview-header-border-color: var(--border);
+  --dv-tabs-and-actions-container-font-size: 12px;
 }
 
 .panel {
   display: flex;
   flex-direction: column;
+  height: 100%;
   background: var(--panel);
   min-width: 0;
   min-height: 0;
 }
-.outliner {
-  grid-area: outliner;
-}
-.viewport-panel {
-  grid-area: viewport;
-}
-.inspector {
-  grid-area: inspector;
-}
-.log-panel {
-  grid-area: log;
+.hint {
+  font-size: 12px;
 }
 
 .panel-header {
@@ -150,7 +152,7 @@ input {
 }
 
 .viewport {
-  flex: 1;
+  height: 100%;
   display: flex;
   background: #121315;
   min-height: 0;
