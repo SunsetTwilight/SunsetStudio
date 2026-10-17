@@ -602,3 +602,186 @@ input.viewer-range {
 .viewer-value {
   min-width: 90px;
 }
+
+/* ---- ノードエディター ---- */
+.node-editor {
+  display: flex;
+  flex-direction: column;
+}
+.node-editor-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.node-editor .react-flow {
+  --xy-background-color: var(--bg);
+  --xy-node-background-color: var(--panel);
+  --xy-node-border-radius: 6px;
+  --xy-edge-label-background-color: var(--panel-header);
+  --xy-edge-label-color: var(--text);
+  --xy-minimap-background-color: var(--panel);
+  --xy-controls-button-background-color: var(--panel-header);
+  --xy-controls-button-color: var(--text);
+}
+.rf-node {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.rf-node.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.rf-node.skipped {
+  opacity: 0.55;
+}
+.rf-node.has-error {
+  border-color: var(--error);
+}
+.rf-node.has-warning {
+  border-color: var(--warning);
+}
+.rf-pass {
+  width: 250px;
+}
+.rf-res {
+  width: 190px;
+  border-radius: 14px;
+  background: #26303a;
+}
+.rf-res.kind-imported {
+  background: #2e2a36;
+  border-style: dashed;
+}
+.rf-res.kind-buffer {
+  background: #2c3326;
+}
+.rf-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.rf-res .rf-head {
+  padding-left: 12px;
+}
+.rf-badge {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #3b5168;
+  font-size: 10px;
+}
+.rf-badge.type-Compute { background: #5a4a6e; }
+.rf-badge.type-Copy { background: #4f5a3b; }
+.rf-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rf-order {
+  color: var(--muted);
+  font: 10px var(--mono);
+}
+.rf-ms {
+  margin-left: auto;
+  color: var(--accent);
+  font: 10px var(--mono);
+}
+.rf-sub {
+  padding: 0 8px 4px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rf-res .rf-sub {
+  padding-left: 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.rf-rows {
+  border-top: 1px solid var(--border);
+  padding: 2px 0;
+}
+.rf-row {
+  display: flex;
+  justify-content: space-between;
+  height: 22px;
+  align-items: center;
+}
+.rf-in,
+.rf-out {
+  position: relative;   /* ハンドルの位置の基準 (はみ出したハンドルを切らないよう overflow は付けない) */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 50%;
+  min-width: 0;
+  height: 100%;
+  white-space: nowrap;
+}
+.rf-in {
+  padding-left: 10px;
+}
+.rf-out {
+  justify-content: flex-end;
+  padding-right: 10px;
+}
+.rf-ref {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rf-as {
+  flex-shrink: 0;
+}
+.rf-as {
+  color: var(--muted);
+  font: 9px var(--mono);
+}
+.rf-new {
+  color: var(--muted);
+  font-size: 10px;
+}
+.rf-handle {
+  width: 10px;
+  height: 10px;
+  border: 1px solid #111;
+}
+.rf-handle.write { background: var(--accent); }
+.rf-handle.read { background: #9aa3ad; }
+.rf-handle.new { background: #555b63; }
+.rf-edge.write .react-flow__edge-path { stroke: var(--accent); stroke-width: 1.6; }
+.rf-edge.read .react-flow__edge-path { stroke: #8c949e; stroke-width: 1.4; }
+.react-flow__edge.selected .react-flow__edge-path { stroke: #ffd36b; stroke-width: 2.4; }
+.react-flow__edge-text { font-size: 9px; }
+.rf-menu {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-header);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.rf-menu button {
+  text-align: left;
+  border: none;
+  background: transparent;
+}
+.rf-menu button:hover {
+  background: rgba(232, 145, 90, 0.18);
+}
+.rf-menu-title {
+  padding: 4px 6px 2px;
+  color: var(--muted);
+  font-size: 11px;
+}

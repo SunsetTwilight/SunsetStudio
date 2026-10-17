@@ -20,6 +20,7 @@ import { InspectorPanel } from './panels/InspectorPanel';
 import { LogPanel } from './panels/LogPanel';
 import { StartScreen } from './panels/StartScreen';
 import { ViewerPanel } from './panels/ViewerPanel';
+import { NodeEditorPanel } from './nodegraph/NodeEditorPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
 import { errorText, loadGraph } from './state/graph';
 import { studioStore, useStudio } from './state/store';
@@ -30,6 +31,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   inspector: () => <InspectorPanel />,
   log: () => <LogPanel />,
   viewer: () => <ViewerPanel />,
+  nodes: () => <NodeEditorPanel />,
 };
 
 // 開いているパネルの API (ツールバーからパネルを開くため)
@@ -40,6 +42,7 @@ const PANEL_TITLES: Record<string, string> = {
   inspector: 'インスペクター',
   log: 'ログ',
   viewer: 'リソースビューアー',
+  nodes: 'ノードエディター',
 };
 
 // パネルがなければ開く (保存した配置から閉じたパネルを戻す)
@@ -50,7 +53,7 @@ export function showPanel(id: string) {
     existing.api.setActive();
     return;
   }
-  const ref = dockApi.getPanel('log') ?? dockApi.getPanel('viewport');
+  const ref = dockApi.getPanel('nodes') ?? dockApi.getPanel('log') ?? dockApi.getPanel('viewport');
   dockApi.addPanel({
     id,
     component: id,
@@ -78,19 +81,25 @@ function defaultLayout(event: DockviewReadyEvent) {
     initialWidth: 380,
   });
   api.addPanel({
+    id: 'nodes',
+    component: 'nodes',
+    title: 'ノードエディター',
+    position: { referencePanel: 'viewport', direction: 'below' },
+    initialHeight: 380,
+  });
+  api.addPanel({
     id: 'log',
     component: 'log',
     title: 'ログ',
-    position: { referencePanel: 'viewport', direction: 'below' },
-    initialHeight: 220,
+    position: { referencePanel: 'nodes', direction: 'within' },
   });
   api.addPanel({
     id: 'viewer',
     component: 'viewer',
     title: 'リソースビューアー',
-    position: { referencePanel: 'log', direction: 'within' },
+    position: { referencePanel: 'nodes', direction: 'within' },
   });
-  api.getPanel('log')?.api.setActive();
+  api.getPanel('nodes')?.api.setActive();
   api.getPanel('viewport')?.api.setActive();
 }
 
@@ -202,6 +211,9 @@ export function App() {
             </span>
             <button onClick={() => void closeProject()} title="プロジェクトを閉じて起動画面に戻る">
               閉じる
+            </button>
+            <button onClick={() => showPanel('nodes')} title="レンダーグラフをノードと線で編集する">
+              ノードエディター
             </button>
             <button onClick={() => showPanel('viewer')} title="途中のテクスチャ (G-Buffer、深度など) を表示する">
               リソースビューアー

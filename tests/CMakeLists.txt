@@ -5,6 +5,7 @@
 #                       (エンジンの DLL の配置と初期化、MathLib、スキーマ)
 #                       環境変数 GFX_TEST_ADAPTER=software で WARP を使う (GPU のない CI 用)
 #    studio_tests_unit  GPU も webview も使わない単体テスト (Bridge、スキーマと JSON の橋渡し、プロジェクトファイル、編集の履歴)
+#    ui_unit            UI の単体テスト (Vitest。editor/frontend の npm run test)
 #    editor_smoke       SunsetEditor --smoke-test --software: ウィンドウを開き、UI の ui.ready / app.info と
 #                       エンジンの初期化 (WARP) を確認して終了する (WebView2 ランタイムとデスクトップが必要)
 #
@@ -51,6 +52,13 @@ add_executable(studio_tests_unit
 )
 target_link_libraries(studio_tests_unit PRIVATE studio_bridge studio_services studio_doctest studio_options)
 add_test(NAME unit COMMAND studio_tests_unit)
+
+# ---- UI の単体テスト (Vitest。ノードエディターのモデルなど) ----
+if(TARGET studio_ui)
+    add_test(NAME ui_unit COMMAND "${STUDIO_NPM}" run test
+             WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/editor/frontend")
+    set_tests_properties(ui_unit PROPERTIES LABELS "ui" TIMEOUT 120)
+endif()
 
 # ---- エディターのスモークテスト ----
 if(TARGET studio_ui)

@@ -12,6 +12,19 @@ import type { GraphInfo, JsonObject, JsonValue } from '../bridge/protocol';
 import { applyGraph, asArray, asObject, findPass, resourceNames, withPass, withResource } from '../state/graph';
 import { studioStore } from '../state/store';
 import { showInViewer } from '../panels/ViewerPanel';
+import { renamePass, renameResource } from '../nodegraph/model';
+
+// 名前の欄 (Enter かフォーカスを外したときに確定する)
+function NameBox({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const commit = () => {
+    const v = text.trim();
+    if (v && v !== value) onCommit(v);
+    else setText(value);
+  };
+  return <input value={text} onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} />;
+}
 
 type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; text: string };
 
@@ -83,6 +96,7 @@ function NumberBox({ value, min, step, onCommit }: { value: number; min?: number
 // ============================================================
 export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) {
   const { status, apply } = useApply(`パス ${name}`);
+  const [renameError, setRenameError] = useState('');
   const g = graph.graph;
   const pass = findPass(g, name);
   if (!pass) return <div className="placeholder">パス '{name}' はありません</div>;
@@ -156,6 +170,21 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
     <div className="graph-editor">
       <StatusLine status={status} />
       <div className="form-row">
+        <span className="form-label">名前</span>
+        <span className="form-control">
+          <NameBox
+            value={name}
+            onCommit={(to) => {
+              const next = renamePass(g, name, to);
+              if (typeof next === 'string') return setRenameError(next);
+              setRenameError('');
+              void apply(next, `名前を ${to} に変更`).then(() => studioStore.select({ kind: 'pass', name: to }));
+            }}
+          />
+        </span>
+      </div>
+      {renameError && <div className="inspector-status error">{renameError}</div>}
+      <div className="form-row">
         <span className="form-label">状態</span>
         <span className="form-control">
           {skipped ? `実行しない (${skipped.reason})` : executed >= 0 ? `${executed + 1} 番目に実行` : '-'}
@@ -219,6 +248,7 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
 // ============================================================
 export function ResourceEditor({ graph, name }: { graph: GraphInfo; name: string }) {
   const { status, apply } = useApply(`リソース ${name}`);
+  const [renameError, setRenameError] = useState('');
   const [formats, setFormats] = useState<string[]>(formatNames ?? []);
   useEffect(() => {
     void loadFormats().then(setFormats).catch(() => setFormats([]));
@@ -238,6 +268,21 @@ export function ResourceEditor({ graph, name }: { graph: GraphInfo; name: string
   return (
     <div className="graph-editor">
       <StatusLine status={status} />
+      <div className="form-row">
+        <span className="form-label">名前</span>
+        <span className="form-control">
+          <NameBox
+            value={name}
+            onCommit={(to) => {
+              const next = renameResource(g, name, to);
+              if (typeof next === 'string') return setRenameError(next);
+              setRenameError('');
+              void apply(next, `名前を ${to} に変更`).then(() => studioStore.select({ kind: 'resource', name: to }));
+            }}
+          />
+        </span>
+      </div>
+      {renameError && <div className="inspector-status error">{renameError}</div>}
       <div className="form-row">
         <span className="form-label">種類</span>
         <span className="form-control">{kind}</span>
