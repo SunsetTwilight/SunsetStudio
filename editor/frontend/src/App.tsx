@@ -7,6 +7,7 @@
 //    └ ステータスバー (エンジンの状態、フレームの統計) ──────┘
 //
 //  パネルはドラッグで移動 / 分割 / タブにできる (dockview)。配置はプロジェクトの Saved/Layout.json に残す。
+//  タブをウィンドウの外へドラッグして離すと、そのパネルを別ウィンドウにする (state/dock.ts)。
 //  ビューポートの上には C++ の子ウィンドウが重なる (ViewportPanel)。
 //  プロジェクトを開いていないときは、起動画面 (StartScreen) を出す (M4a)。
 // ============================================================
@@ -19,9 +20,10 @@ import { GraphPanel } from './panels/GraphPanel';
 import { InspectorPanel } from './panels/InspectorPanel';
 import { LogPanel } from './panels/LogPanel';
 import { StartScreen } from './panels/StartScreen';
-import { ViewerPanel } from './panels/ViewerPanel';
+import { setViewer, ViewerPanel } from './panels/ViewerPanel';
 import { NodeEditorPanel } from './nodegraph/NodeEditorPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
+import { popoutPanel, setDockApi, showPanel, watchDragOut } from './state/dock';
 import { errorText, loadGraph } from './state/graph';
 import { studioStore, useStudio } from './state/store';
 
@@ -33,34 +35,6 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   viewer: () => <ViewerPanel />,
   nodes: () => <NodeEditorPanel />,
 };
-
-// 開いているパネルの API (ツールバーからパネルを開くため)
-let dockApi: DockviewReadyEvent['api'] | null = null;
-const PANEL_TITLES: Record<string, string> = {
-  viewport: 'ビューポート',
-  graph: 'レンダーグラフ',
-  inspector: 'インスペクター',
-  log: 'ログ',
-  viewer: 'リソースビューアー',
-  nodes: 'ノードエディター',
-};
-
-// パネルがなければ開く (保存した配置から閉じたパネルを戻す)
-export function showPanel(id: string) {
-  if (!dockApi) return;
-  const existing = dockApi.getPanel(id);
-  if (existing) {
-    existing.api.setActive();
-    return;
-  }
-  const ref = dockApi.getPanel('nodes') ?? dockApi.getPanel('log') ?? dockApi.getPanel('viewport');
-  dockApi.addPanel({
-    id,
-    component: id,
-    title: PANEL_TITLES[id] ?? id,
-    position: ref ? { referencePanel: ref.id, direction: 'within' } : undefined,
-  });
-}
 
 // 既定のレイアウト
 function defaultLayout(event: DockviewReadyEvent) {
@@ -118,6 +92,8 @@ export function App() {
     const offProject = on('project.changed', studioStore.setProject);
     const offEdit = on('edit.changed', studioStore.setEdit);
     const offViewer = on('viewer.pixel', studioStore.setViewerPixel);
+    const offPreview = on('preview.changed', (e) => studioStore.setPreviews(e.previews));
+    const offFloat = on('viewport.changed', (e) => studioStore.setViewportFloating(e.floating));
     installEventSink();
     const off = () => {
       offLog();
@@ -127,6 +103,8 @@ export function App() {
       offProject();
       offEdit();
       offViewer();
+      offPreview();
+      offFloat();
     };
 
     if (!isConnected()) {
@@ -162,6 +140,17 @@ export function App() {
 
   const project = useStudio((s) => s.project);
   const editState = useStudio((s) => s.edit);
+  const viewer = useStudio((s) => s.viewer);
+  const previews = useStudio((s) => s.previews);
+  const floating = useStudio((s) => s.viewportFloating);
+
+  // プロジェクトを開いたら、ビューアー / プレビュー / ビューポートの状態を読む (ツールバーに出す)
+  useEffect(() => {
+    if (!isConnected() || !project?.open) return;
+    call('viewer.get').then(studioStore.setViewer).catch(() => {});
+    call('preview.list').then((r) => studioStore.setPreviews(r.previews)).catch(() => {});
+    call('viewport.state').then((r) => studioStore.setViewportFloating(r.floating)).catch(() => {});
+  }, [project?.open, project?.file]);
   const [closeError, setCloseError] = useState('');
   const [editError, setEditError] = useState('');
 
@@ -219,6 +208,16 @@ export function App() {
               リソースビューアー
             </button>
             <button
+              onClick={() =>
+                floating
+                  ? void call('viewport.float', { floating: false }).then((r) => studioStore.setViewportFloating(r.floating)).catch(() => {})
+                  : void popoutPanel('viewport')
+              }
+              title={floating ? 'ビューポートをメインのウィンドウに戻す' : 'ビューポートを別ウィンドウにする (タブをウィンドウの外へドラッグしても同じ)'}
+            >
+              {floating ? 'ビューポートを戻す' : 'ビューポートを別ウィンドウに'}
+            </button>
+            <button
               onClick={() => void undoRedo(true)}
               disabled={!editState?.canUndo}
               title={editState?.canUndo ? `元に戻す: ${editState.undoLabel} (Ctrl+Z)` : '元に戻す編集はありません'}
@@ -233,6 +232,19 @@ export function App() {
               ↷ やり直す
             </button>
           </>
+        )}
+        {project?.open && viewer?.enabled && viewer.resource && (
+          <span className="chip viewing" title="ビューポートに、最終出力の代わりにこのリソースを表示しています">
+            表示中: {viewer.resource}
+            <button onClick={() => void setViewer({ enabled: false })} title="ビューポートを最終出力に戻す">
+              ✕
+            </button>
+          </span>
+        )}
+        {project?.open && previews.length > 0 && (
+          <span className="chip" title={previews.map((p) => p.resource + (p.status ? ` (${p.status})` : '')).join('\n')}>
+            別ウィンドウ {previews.length}
+          </span>
         )}
         {editError && <span className="status error" title={editError}>{editError.split('\n')[0]}</span>}
         {closeError && <span className="status error">{closeError}</span>}
@@ -275,7 +287,8 @@ function Workspace() {
   if (layout === undefined) return <div className="placeholder">パネルの配置を読み込んでいます…</div>;
 
   const onReady = (event: DockviewReadyEvent) => {
-    dockApi = event.api;
+    setDockApi(event.api);
+    watchDragOut(event.api);
     let restored = false;
     if (layout && typeof layout === 'object') {
       try {

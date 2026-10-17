@@ -12,10 +12,14 @@
 //  毎フレーム (vsync) シーンを描く。見えていない / 最小化のあいだは描かずに待つ。
 //  M3d: シーンはレンダーグラフ (ViewportRenderer) で描き、アセットの変更を毎フレーム反映する。
 //  M4a: シーンはプロジェクトを開いてから作る (openProject)。開いていなければ描かない。
+//  プレビュー (M4): グラフのリソースを別ウィンドウ (FloatingWindow) に表示する。グラフは 1 フレームに 1 回だけ記録し、
+//  そのあとでウィンドウごとにリソースを描いて Present する (vsync はビューポートだけ)。
+//  ビューポートが見えていなくてもプレビューがあれば、グラフはオフスクリーンの $backbuffer に描く。
 // ============================================================
 
 #include "OrbitCamera.h"
 #include "ViewportRenderer.h"
+#include "viewport/FloatingWindow.h"
 #include "viewport/ViewportWindow.h"
 
 #include "gfx/core/GraphicsEngine.h"
@@ -73,6 +77,8 @@ public:
 		std::function<void(uint64_t revision)>                                       graphChanged;   // グラフが切り替わった (読み直し / 編集)
 		// リソースビューアー: カーソルの下のピクセルの値 (probe.valid = false なら値はない) と、表示できない理由 (約 10 回 / 秒)
 		std::function<void(const ResourceViewer::Probe& probe, const std::string& status)> viewer;
+		// プレビューの表示できない理由が変わった (空なら表示できている)
+		std::function<void(uint32_t id, const std::string& status)> previewStatus;
 	};
 
 	RenderThread() = default;
@@ -105,6 +111,14 @@ public:
 	void attachViewport(ViewportWindow* window);
 	// スワップチェーンを破棄し、描画スレッドから done を呼ぶ (そのあとでウィンドウを破棄してよい)
 	void detachViewport(std::function<void()> done);
+	// ビューポートのスワップチェーンだけを破棄する (親のウィンドウを替える前)。次に描くときに作り直す
+	void resetViewport(std::function<void()> done);
+
+	// プレビューのウィンドウを加える。window は removePreview の done が呼ばれるまで有効にしておくこと
+	void addPreview(uint32_t id, FloatingWindow* window, const ResourceViewer::Settings& settings);
+	void setPreview(uint32_t id, const ResourceViewer::Settings& settings);
+	// スワップチェーンを破棄し、描画スレッドから done を呼ぶ (そのあとでウィンドウを破棄してよい)
+	void removePreview(uint32_t id, std::function<void()> done);
 
 	// 残っている処理を実行してからエンジンを終了し、スレッドの終了を待つ (待つあいだ UI のメッセージを処理する)
 	void stop();
@@ -114,6 +128,11 @@ public:
 private:
 	void threadMain(Config config, Callbacks callbacks);
 	bool canRender() const;
+	bool viewportDrawable() const;
+	bool anyPreviewDrawable() const;
+	void renderPreviews(GraphicsEngine& engine);
+	// 後片付けの処理を積む。スレッドが止まっていれば、代わりに fallback をその場で呼ぶ
+	void postAlways(Task task, std::function<void()> fallback);
 	void renderFrame(GraphicsEngine& engine);
 	void releaseViewport(GraphicsEngine& engine);
 	void pollAssets();
@@ -139,6 +158,21 @@ private:
 	RenderWindow*   m_window   = nullptr;
 	uint32_t        m_windowW  = 0, m_windowH = 0;
 	OrbitCamera     m_camera;
+	IRenderTarget*  m_offscreen = nullptr;   // ビューポートが見えないときの $backbuffer
+	uint32_t        m_offscreenW = 0, m_offscreenH = 0;
+
+	struct Preview
+	{
+		uint32_t                  id = 0;
+		FloatingWindow*           window = nullptr;
+		RenderWindow*             swap = nullptr;
+		uint32_t                  w = 0, h = 0;
+		ResourceViewer::Settings  settings;
+		ResourceViewer::ViewCache cache;
+		std::string               status;
+		bool                      reported = false;
+	};
+	std::vector<Preview> m_previews;
 
 	uint64_t        m_frames = 0;
 	std::chrono::steady_clock::time_point m_viewerReport = std::chrono::steady_clock::now();

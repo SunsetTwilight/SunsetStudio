@@ -237,6 +237,33 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 	cb->release();
 }
 
+void ViewportRenderer::drawPreview(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height,
+                                   const ResourceViewer::Settings& settings, ResourceViewer::ViewCache& cache,
+                                   const OrbitCamera& camera, std::string& status)
+{
+	status.clear();
+	if (!m_viewerOk)
+		return void(status = "リソースビューアーを使えません (理由はログ)");
+	if (!rt || width == 0 || height == 0 || !m_graph || !m_graph->valid())
+		return;
+	ICommandBuffer* cb = engine.allocCommandBuffer();
+	if (!cb)
+		return;
+	cb->begin();
+	cb->beginEvent("Preview");
+	if (!m_viewer.draw(engine, cb, *m_executor, settings, cache, rt, width, height, camera.zNear(), camera.zFar(), status))
+	{
+		// 表示できないときは暗い色で塗る (前の画像を残さない)
+		const float clear[4] = { 0.08f, 0.08f, 0.09f, 1.0f };
+		cb->setRenderTargets(1, &rt, nullptr, false, false);
+		cb->clearRenderTarget(rt, clear);
+	}
+	cb->endEvent();
+	cb->end();
+	engine.submitCommandBuffers({ cb });
+	cb->release();
+}
+
 void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::DrawContext& ctx)
 {
 	if (query.layer == "Opaque")

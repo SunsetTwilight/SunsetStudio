@@ -229,6 +229,7 @@ int EditorApp::run()
 	registerProjectMethods();
 	registerEditMethods();
 	registerViewerMethods();
+	registerWindowMethods();
 	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
@@ -260,12 +261,16 @@ int EditorApp::run()
 		}
 		m_host.emit("viewer.pixel", j);
 	};
+	callbacks.previewStatus = [this](uint32_t id, const std::string& status) {
+		m_host.post([this, id, status] { onPreviewStatus(id, status); });
+	};
 	m_render.start(renderConfig, std::move(callbacks));
 	m_render.attachViewport(&m_viewport);
 
 	// ×ボタンで閉じるときは、ビューポートのスワップチェーンを先に解放してからウィンドウを閉じる
+	// 別ウィンドウ (プレビュー、ビューポートの枠) もメインのウィンドウと一緒に壊れるので、先にスワップチェーンを解放する
 	m_host.setCloseHandler([this](std::function<void()> proceed) {
-		m_render.detachViewport([this, proceed] { m_host.post(proceed); });
+		releaseWindows([this, proceed] { m_render.detachViewport([this, proceed] { m_host.post(proceed); }); });
 	});
 
 	// ---- プロジェクト: スモークテストは一時フォルダにテンプレートから作る。コマンドラインで渡されたものを開く ----
@@ -338,7 +343,9 @@ int EditorApp::run()
 	}
 	// エンジン (とスワップチェーン) を終了してから、ビューポートのウィンドウと WebView を破棄する
 	m_render.stop();
+	m_previews.clear();
 	m_viewport.destroy();
+	m_viewportFrame.reset();
 	if (!m_smokeDir.empty())
 	{
 		std::error_code ec;
@@ -380,12 +387,21 @@ void EditorApp::registerMethods()
 	// ビューポートの矩形 (WebView のクライアント座標の CSS px) と devicePixelRatio。
 	// 物理ピクセルに直して子ウィンドウを動かす。描画スレッドはその大きさに合わせてスワップチェーンを作り直す
 	b.registerMethod("viewport.setRect", [this](const Json& p, Bridge::Reply r) {
+		if (m_viewportFrame || m_viewportBusy)   // 別ウィンドウにしているあいだは、Web の矩形を覚えるだけ
+		{
+			const double d = p.value("dpr", 1.0);
+			m_viewportWebRect = { static_cast<int>(std::lround(p.at("x").get<double>() * d)), static_cast<int>(std::lround(p.at("y").get<double>() * d)),
+			                      static_cast<int>(std::lround(p.at("width").get<double>() * d)), static_cast<int>(std::lround(p.at("height").get<double>() * d)),
+			                      p.value("visible", true) };
+			return r.ok({ { "width", m_viewport.width() }, { "height", m_viewport.height() }, { "visible", m_viewport.visible() }, { "floating", true } });
+		}
 		const double dpr     = p.value("dpr", 1.0);
 		const bool   visible = p.value("visible", true);
 		const int x  = static_cast<int>(std::lround(p.at("x").get<double>() * dpr));
 		const int y  = static_cast<int>(std::lround(p.at("y").get<double>() * dpr));
 		const int x2 = static_cast<int>(std::lround((p.at("x").get<double>() + p.at("width").get<double>()) * dpr));
 		const int y2 = static_cast<int>(std::lround((p.at("y").get<double>() + p.at("height").get<double>()) * dpr));
+		m_viewportWebRect = { x, y, std::max(0, x2 - x), std::max(0, y2 - y), visible };
 		m_viewport.setRect(x, y, std::max(0, x2 - x), std::max(0, y2 - y), visible);
 		m_render.wake();
 		r.ok({ { "width", m_viewport.width() }, { "height", m_viewport.height() }, { "visible", m_viewport.visible() } });
@@ -688,13 +704,71 @@ void EditorApp::checkSmokeTest()
 						m_host.bridge().callLocal("viewer.set", { { "enabled", false }, { "pin", nullptr } }, [](int, const Json&) {});
 					});
 				});
-			m_smokeStage     = SmokeStage::WaitAfter;
-			m_smokeFrameMark = m_framesDrawn;
-			return;
+			m_smokeStage       = SmokeStage::Windows;
+			m_smokeWindowStep  = 0;
+			m_smokeWindowStart = std::chrono::steady_clock::now();
+			return checkSmokeTest();
 		}
 		if (elapsed > std::chrono::seconds(15))
 			return finish(9, "リソースビューアーのピクセルの値が届かない: " + pixel.dump() + " ");
 		return;
+	}
+	case SmokeStage::Windows:
+	{
+		// 別ウィンドウ: gbAlbedo のプレビューを開き、ビューポートを別ウィンドウにして描けること、戻せることを確かめる
+		if (std::chrono::steady_clock::now() - m_smokeWindowStart > std::chrono::seconds(20))
+			return finish(10, "別ウィンドウの確認が終わらない (step " + std::to_string(m_smokeWindowStep) + ")");
+		switch (m_smokeWindowStep)
+		{
+		case 0:
+			m_smokeWindowStep = 1;
+			m_host.bridge().callLocal("preview.open", { { "resource", "gbAlbedo" } }, [this, finish](int status, const Json& r) {
+				m_host.post([this, finish, status, r] {
+					if (status != 0)
+						return finish(10, "preview.open: " + r.dump());
+					m_smokeWindowStep = 2;
+				});
+			});
+			return;
+		case 2:
+		{
+			// プレビューが描けた (表示できない理由が空) ことが描画スレッドから届くまで待つ
+			const auto it = std::find_if(m_previews.begin(), m_previews.end(), [](const PreviewEntry& e) { return e.statusKnown; });
+			if (it == m_previews.end())
+				return;
+			if (!it->status.empty())
+				return finish(10, "プレビューを表示できない: " + it->status);
+			log("info", "smoke", "preview: gbAlbedo を別ウィンドウに表示");
+			m_smokeWindowStep = 3;
+			floatViewport(true, -1, -1, [this, finish](bool ok, const std::string& error) {
+				if (!ok)
+					return finish(10, "ビューポートを別ウィンドウにできない: " + error);
+				m_smokeFrameMark  = m_framesDrawn;
+				m_smokeWindowStep = 4;
+			});
+			return;
+		}
+		case 4:
+			if (m_framesDrawn < m_smokeFrameMark + 10)
+				return;
+			log("info", "smoke", "viewport: 別ウィンドウで描画");
+			m_smokeWindowStep = 5;
+			floatViewport(false, -1, -1, [this, finish](bool ok, const std::string& error) {
+				if (!ok)
+					return finish(10, "ビューポートを戻せない: " + error);
+				closeAllPreviews();
+				m_smokeWindowStep = 6;
+			});
+			return;
+		case 6:
+			if (!m_previews.empty())
+				return;
+			m_smokeStage     = SmokeStage::WaitAfter;
+			m_smokeFrameMark = m_framesDrawn;
+			return;
+		default:
+			return;
+		}
 	}
 	case SmokeStage::WaitAfter:
 		// パイプラインとグラフを作り直したあとも描けていること
@@ -843,6 +917,7 @@ void EditorApp::openProject(const std::filesystem::path& file, std::function<voi
 		log("warning", "project", w);
 
 	m_projectBusy = true;
+	closeAllPreviews();   // 前のプロジェクトのリソースを表示している
 	m_render.openProject(project.assetRoot(), project.desc.viewportGraph,
 		[this, project, done](bool ok, const std::string& error) {
 			// 描画スレッドから呼ばれる
@@ -938,6 +1013,9 @@ void EditorApp::registerProjectMethods()
 	b.registerMethod("project.close", [this](const Json&, Bridge::Reply r) {
 		if (m_projectBusy)
 			return r.error(BridgeError::Unavailable, "プロジェクトを開いています");
+		closeAllPreviews();
+		if (m_viewportFrame)
+			floatViewport(false, -1, -1, [](bool, const std::string&) {});
 		m_render.closeProject([this, r] {
 			m_host.post([this, r] {
 				m_project.reset();
@@ -1058,9 +1136,7 @@ void EditorApp::registerEditMethods()
 // ============================================================
 //  リソースビューアー (M4)
 // ============================================================
-namespace
-{
-Json viewerJson(const ResourceViewer::Settings& v)
+Json EditorApp::viewerJson(const ResourceViewer::Settings& v)
 {
 	return {
 		{ "enabled", v.enabled }, { "resource", v.resource }, { "mip", v.mip }, { "channels", v.channels },
@@ -1068,7 +1144,34 @@ Json viewerJson(const ResourceViewer::Settings& v)
 		{ "rangeMax", v.rangeMax }, { "gamma", v.gamma }, { "pin", v.pinX >= 0 ? Json{ v.pinX, v.pinY } : Json(nullptr) },
 	};
 }
-} // namespace
+
+bool EditorApp::applyViewerPatch(const Json& p, ResourceViewer::Settings& v, std::string& error)
+{
+	try
+	{
+		if (p.contains("enabled"))     v.enabled     = p.at("enabled").get<bool>();
+		if (p.contains("resource"))    v.resource    = p.at("resource").get<std::string>();
+		if (p.contains("mip"))         v.mip         = p.at("mip").get<uint32_t>();
+		if (p.contains("channels"))    v.channels    = p.at("channels").get<uint32_t>() & 0xF;
+		if (p.contains("depthLinear")) v.depthLinear = p.at("depthLinear").get<bool>();
+		if (p.contains("exposure"))    v.exposure    = p.at("exposure").get<float>();
+		if (p.contains("rangeMin"))    v.rangeMin    = p.at("rangeMin").get<float>();
+		if (p.contains("rangeMax"))    v.rangeMax    = p.at("rangeMax").get<float>();
+		if (p.contains("gamma"))       v.gamma       = p.at("gamma").get<bool>();
+		if (p.contains("pin"))
+		{
+			const Json& pin = p.at("pin");
+			v.pinX = pin.is_array() ? pin.at(0).get<int>() : -1;
+			v.pinY = pin.is_array() ? pin.at(1).get<int>() : -1;
+		}
+	}
+	catch (const std::exception& e)
+	{
+		error = std::string("値が不正です: ") + e.what();
+		return false;
+	}
+	return true;
+}
 
 void EditorApp::registerViewerMethods()
 {
@@ -1093,28 +1196,9 @@ void EditorApp::registerViewerMethods()
 			if (!scene->viewerOk())
 				return r.error(BridgeError::Unavailable, "リソースビューアーを使えません (理由はログ)");
 			ResourceViewer::Settings v = scene->viewer().settings();
-			try
-			{
-				if (p.contains("enabled"))     v.enabled     = p.at("enabled").get<bool>();
-				if (p.contains("resource"))    v.resource    = p.at("resource").get<std::string>();
-				if (p.contains("mip"))         v.mip         = p.at("mip").get<uint32_t>();
-				if (p.contains("channels"))    v.channels    = p.at("channels").get<uint32_t>() & 0xF;
-				if (p.contains("depthLinear")) v.depthLinear = p.at("depthLinear").get<bool>();
-				if (p.contains("exposure"))    v.exposure    = p.at("exposure").get<float>();
-				if (p.contains("rangeMin"))    v.rangeMin    = p.at("rangeMin").get<float>();
-				if (p.contains("rangeMax"))    v.rangeMax    = p.at("rangeMax").get<float>();
-				if (p.contains("gamma"))       v.gamma       = p.at("gamma").get<bool>();
-				if (p.contains("pin"))
-				{
-					const Json& pin = p.at("pin");
-					v.pinX = pin.is_array() ? pin.at(0).get<int>() : -1;
-					v.pinY = pin.is_array() ? pin.at(1).get<int>() : -1;
-				}
-			}
-			catch (const std::exception& e)
-			{
-				return r.error(BridgeError::InvalidParams, std::string("値が不正です: ") + e.what());
-			}
+			std::string error;
+			if (!applyViewerPatch(p, v, error))
+				return r.error(BridgeError::InvalidParams, error);
 			scene->viewer().settings() = v;
 			r.ok(viewerJson(v));
 		});

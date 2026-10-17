@@ -166,17 +166,16 @@ bool ResourceViewer::init(GraphicsEngine& engine, std::string& error)
 	return ok;
 }
 
-void ResourceViewer::releaseView(GraphicsEngine& engine)
+void ResourceViewer::releaseCache(GraphicsEngine& engine, ViewCache& cache)
 {
-	if (m_srv.valid())
-		engine.destroyView(m_srv);   // GPU が使い終わるまでエンジンが解放を遅らせる
-	m_srv        = {};
-	m_srvTexture = 0;
+	if (cache.srv.valid())
+		engine.destroyView(cache.srv);   // GPU が使い終わるまでエンジンが解放を遅らせる
+	cache = {};
 }
 
 void ResourceViewer::shutdown(GraphicsEngine& engine)
 {
-	releaseView(engine);
+	releaseCache(engine, m_cache);
 	if (m_probeUav.valid()) engine.destroyView(m_probeUav);
 	engine.destroyBuffer(m_probeBuffer);
 	for (auto& s : m_slots)
@@ -198,31 +197,29 @@ void ResourceViewer::shutdown(GraphicsEngine& engine)
 	m_vs = m_ps = m_cs = {};
 }
 
-void ResourceViewer::record(GraphicsEngine& engine, ICommandBuffer* cb, const gfx::rg::Executor& executor,
-                            IRenderTarget* rt, uint32_t w, uint32_t h, int cursorX, int cursorY, float zNear, float zFar)
+bool ResourceViewer::draw(GraphicsEngine& engine, ICommandBuffer* cb, const gfx::rg::Executor& executor, const Settings& settings,
+                          ViewCache& cache, IRenderTarget* rt, uint32_t w, uint32_t h, float zNear, float zFar,
+                          std::string& status, DrawInfo* info)
 {
-	++m_frame;
-	m_status.clear();
-	if (!m_settings.enabled || !cb || !rt || w == 0 || h == 0)
-		return;
-
+	status.clear();
+	if (!cb || !rt || w == 0 || h == 0)
+		return false;
 	gfx::rg::RecordedTexture tex;
-	if (m_settings.resource.empty())
-		return void(m_status = "表示するリソースを選んでください");
-	if (!executor.recordedTexture(m_settings.resource, tex))
-		return void(m_status = "'" + m_settings.resource + "' はこのフレームで使われていないか、グラフのテクスチャではありません");
+	if (settings.resource.empty())
+		return status = "表示するリソースを選んでください", false;
+	if (!executor.recordedTexture(settings.resource, tex))
+		return status = "'" + settings.resource + "' はこのフレームで使われていないか、グラフのテクスチャではありません", false;
 	if (tex.dimension != gfx::rg::TextureDimension::Tex2D || tex.layers != 1)
-		return void(m_status = "配列 / キューブ / 3D のテクスチャはまだ表示できません");
+		return status = "配列 / キューブ / 3D のテクスチャはまだ表示できません", false;
 	if (tex.samples > 1)
-		return void(m_status = "MSAA のテクスチャはまだ表示できません (解決したテクスチャを選んでください)");
+		return status = "MSAA のテクスチャはまだ表示できません (解決したテクスチャを選んでください)", false;
 	if (isIntegerFormat(tex.format))
-		return void(m_status = "整数のフォーマットはまだ表示できません");
-	const uint32_t mip = std::min(m_settings.mip, tex.mips - 1);
+		return status = "整数のフォーマットはまだ表示できません", false;
+	const uint32_t mip = std::min(settings.mip, tex.mips - 1);
 
-	// 表示する mip の SRV (テクスチャか mip が変わったら作り直す)
-	if (!m_srv.valid() || m_srvTexture != tex.handle.id || m_srvMip != mip)
+	if (!cache.srv.valid() || cache.texture != tex.handle.id || cache.mip != mip)
 	{
-		releaseView(engine);
+		releaseCache(engine, cache);
 		GfxViewDesc d;
 		d.type            = GfxViewType::SRV;
 		d.resource        = gfxRef(tex.handle);
@@ -230,16 +227,16 @@ void ResourceViewer::record(GraphicsEngine& engine, ICommandBuffer* cb, const gf
 		d.mostDetailedMip = mip;
 		d.mipLevels       = 1;
 		d.debugName       = "ResourceViewer";
-		m_srv        = engine.createView(d);
-		m_srvTexture = tex.handle.id;
-		m_srvMip     = mip;
-		if (!m_srv.valid())
-			return void(m_status = "テクスチャのビューを作れません");
+		cache.srv     = engine.createView(d);
+		cache.texture = tex.handle.id;
+		cache.mip     = mip;
+		if (!cache.srv.valid())
+			return status = "テクスチャのビューを作れません", false;
 	}
 
 	const uint32_t tw = std::max(1u, tex.width >> mip);
 	const uint32_t th = std::max(1u, tex.height >> mip);
-	// 縦横比を保ってビューポートに収める
+	// 縦横比を保って表示先に収める
 	const float scale = std::min(static_cast<float>(w) / static_cast<float>(tw), static_cast<float>(h) / static_cast<float>(th));
 	const float rw = tw * scale, rh = th * scale;
 	const float rx = std::floor((w - rw) * 0.5f), ry = std::floor((h - rh) * 0.5f);
@@ -247,16 +244,15 @@ void ResourceViewer::record(GraphicsEngine& engine, ICommandBuffer* cb, const gf
 	const bool depth = isDepthFormat(tex.format);
 	ViewConstants vc;
 	vc.rect[0]  = rx; vc.rect[1] = ry; vc.rect[2] = rw; vc.rect[3] = rh;
-	vc.range[0] = m_settings.rangeMin;
-	vc.range[1] = m_settings.rangeMax;
-	vc.range[2] = std::exp2(m_settings.exposure);
-	vc.range[3] = (depth && m_settings.depthLinear) ? 1.0f : 0.0f;
-	vc.depth[0] = zNear; vc.depth[1] = zFar; vc.depth[2] = m_settings.gamma ? 1.0f : 0.0f; vc.depth[3] = 0;
-	vc.info[0]  = tw; vc.info[1] = th; vc.info[2] = m_settings.channels & 0xF; vc.info[3] = 0;
+	vc.range[0] = settings.rangeMin;
+	vc.range[1] = settings.rangeMax;
+	vc.range[2] = std::exp2(settings.exposure);
+	vc.range[3] = (depth && settings.depthLinear) ? 1.0f : 0.0f;
+	vc.depth[0] = zNear; vc.depth[1] = zFar; vc.depth[2] = settings.gamma ? 1.0f : 0.0f; vc.depth[3] = 0;
+	vc.info[0]  = tw; vc.info[1] = th; vc.info[2] = settings.channels & 0xF; vc.info[3] = 0;
 	if (vc.info[2] == 0)
 		vc.info[2] = 0x7;
 
-	cb->beginEvent("ResourceViewer");
 	cb->barrier(gfxTransition(gfxRef(tex.handle), GfxResourceState::AllShaderResource));
 	cb->setRenderTargets(1, &rt, nullptr, false, false);
 	GfxViewport vp;
@@ -269,9 +265,33 @@ void ResourceViewer::record(GraphicsEngine& engine, ICommandBuffer* cb, const gf
 	cb->setScissors(1, &sc);
 	cb->bindPipeline(m_viewPipe);
 	cb->setRootConstants(0, 16, &vc);
-	const GfxDescriptor srv = gfxView(m_srv);
+	const GfxDescriptor srv = gfxView(cache.srv);
 	cb->setDescriptorTable(1, &srv, 1);
 	cb->drawInstanced(3);
+	if (info)
+		*info = { rx, ry, scale, tw, th, mip, depth };
+	return true;
+}
+
+void ResourceViewer::record(GraphicsEngine& engine, ICommandBuffer* cb, const gfx::rg::Executor& executor,
+                            IRenderTarget* rt, uint32_t w, uint32_t h, int cursorX, int cursorY, float zNear, float zFar)
+{
+	++m_frame;
+	m_status.clear();
+	if (!m_settings.enabled || !cb || !rt || w == 0 || h == 0)
+		return;
+
+	cb->beginEvent("ResourceViewer");
+	DrawInfo di;
+	if (!draw(engine, cb, executor, m_settings, m_cache, rt, w, h, zNear, zFar, m_status, &di))
+	{
+		cb->endEvent();
+		return;
+	}
+	const float    rx = di.x, ry = di.y, scale = di.scale;
+	const uint32_t tw = di.texWidth, th = di.texHeight, mip = di.mip;
+	const bool     depth = di.depth;
+	const GfxDescriptor srv = gfxView(m_cache.srv);
 
 	// ---- カーソルの下のピクセル (固定したテクセルがあればそれ) ----
 	const bool pinned = m_settings.pinX >= 0 && m_settings.pinY >= 0;

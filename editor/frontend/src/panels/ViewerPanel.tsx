@@ -57,6 +57,13 @@ export function ViewerPanel() {
             </option>
           ))}
         </select>
+        <button
+          disabled={!viewer.resource}
+          title="このリソースを別ウィンドウに表示する (今の設定で)"
+          onClick={() => void openPreview(viewer.resource, current?.format ?? '', undefined, viewer).then(setError)}
+        >
+          別ウィンドウ
+        </button>
       </header>
       {error && <div className="inspector-status error">{error}</div>}
       {viewer.enabled && pixel?.status && <div className="inspector-status busy">{pixel.status}</div>}
@@ -176,6 +183,27 @@ export async function setViewer(patch: Partial<ViewerSettings>, onError?: (e: st
 // リソースを選んでビューアーに表示する (インスペクターなどから)
 export function showInViewer(resource: string, format: string) {
   void setViewer(defaultsFor(resource, format));
+}
+
+// リソースを別ウィンドウに表示する。settings を省くとフォーマットに合う既定値。at はスクリーン座標 (CSS px)。
+// 失敗したら理由を返す
+export async function openPreview(
+  resource: string,
+  format: string,
+  at?: { x: number; y: number },
+  settings?: Partial<ViewerSettings>,
+): Promise<string> {
+  try {
+    await call('preview.open', {
+      ...(settings ?? defaultsFor(resource, format)),
+      pin: null,
+      resource,
+      ...(at ? { x: at.x, y: at.y, dpr: window.devicePixelRatio || 1 } : {}),
+    });
+    return '';
+  } catch (e) {
+    return errorText(e);
+  }
 }
 
 function formatValue(v: number): string {

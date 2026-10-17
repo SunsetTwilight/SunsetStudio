@@ -7,6 +7,7 @@
 //    ・チャンネル (R / G / B / A の組み合わせ。1 つだけなら白黒)、mip、深度の線形化、露出、表示する範囲、ガンマ
 //    ・カーソルの下のピクセルの値を、Compute で読んでリードバック (ABI 8) で CPU に戻す (数フレーム遅れる)
 //  表示はグラフの記録のあとに、同じコマンドバッファでバックバッファに上書きする。
+//  プレビューのウィンドウ (別ウィンドウで表示) は draw だけを使い、設定と SRV をウィンドウごとに持つ。
 //  対象は 2D (配列でない、MSAA でない、整数でない) のテクスチャ。それ以外は理由を返して表示しない。
 //
 //  描画スレッドだけが使う。
@@ -48,6 +49,21 @@ public:
 		float                distance = 0.0f;    // 深度のとき、視点からの距離 (value[0] から求める)
 	};
 
+	// 表示している mip の SRV (テクスチャか mip が変わったら作り直す)。表示先ごとに持つ
+	struct ViewCache
+	{
+		ViewHandle srv;
+		uint64_t   texture = 0;
+		uint32_t   mip     = 0;
+	};
+	// 表示した矩形 (ピクセル) と、テクスチャの 1 テクセルあたりのピクセル数
+	struct DrawInfo
+	{
+		float    x = 0, y = 0, scale = 1;
+		uint32_t texWidth = 0, texHeight = 0, mip = 0;
+		bool     depth = false;
+	};
+
 	bool init(GraphicsEngine& engine, std::string& error);
 	void shutdown(GraphicsEngine& engine);
 
@@ -58,6 +74,12 @@ public:
 	// 表示できなければ status に理由を入れて何もしない
 	void record(GraphicsEngine& engine, ICommandBuffer* cb, const gfx::rg::Executor& executor,
 	            IRenderTarget* rt, uint32_t w, uint32_t h, int cursorX, int cursorY, float zNear, float zFar);
+
+	// rt (w x h) に settings のリソースを表示するだけ (settings.enabled は見ない)。表示できなければ false と status に理由
+	bool draw(GraphicsEngine& engine, ICommandBuffer* cb, const gfx::rg::Executor& executor, const Settings& settings,
+	          ViewCache& cache, IRenderTarget* rt, uint32_t w, uint32_t h, float zNear, float zFar,
+	          std::string& status, DrawInfo* info = nullptr);
+	static void releaseCache(GraphicsEngine& engine, ViewCache& cache);
 
 	const std::string& status() const { return m_status; }   // 空なら表示できている
 	// 読み終わった最新のピクセルの値 (前回から新しいものがなければ valid = false)
@@ -72,8 +94,6 @@ private:
 		Probe        probe;
 	};
 
-	void releaseView(GraphicsEngine& engine);
-
 	Settings            m_settings;
 	std::string         m_status;
 	BindingLayoutHandle m_viewLayout, m_probeLayout;
@@ -81,9 +101,7 @@ private:
 	ShaderHandle        m_vs, m_ps, m_cs;
 	BufferHandle        m_probeBuffer;   // Compute が書く (Storage)
 	ViewHandle          m_probeUav;
-	ViewHandle          m_srv;           // 表示しているテクスチャの mip の SRV
-	uint64_t            m_srvTexture = 0;
-	uint32_t            m_srvMip     = 0;
+	ViewCache           m_cache;         // ビューポートに表示しているテクスチャの SRV
 	std::array<Slot, 3> m_slots;
 	uint64_t            m_frame = 0, m_lastProbeFrame = 0;
 	float               m_zNear = 0.1f, m_zFar = 1000.0f;

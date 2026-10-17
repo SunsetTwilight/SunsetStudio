@@ -10,6 +10,7 @@ import {
   autoLayout,
   buildModel,
   connect,
+  previewTargets,
   removeEdges,
   removeNodes,
   renamePass,
@@ -162,5 +163,22 @@ describe('名前の変更', () => {
     expect(refs(g, 'Lighting', 'inputs')[1].res).toBe('normals');
     expect(renameResource(graph, 'gbNormal', 'depth')).toMatch(/すでに/);
     expect(renameResource(graph, 'gbNormal', '$x')).toMatch(/\$/);
+  });
+});
+
+describe('ノードの結果の表示', () => {
+  it('リソースはそれ自身、パスは出力 → 入力の順にテクスチャを返し、インポートとバッファは除く', () => {
+    expect(previewTargets(graph, 'res:depth')).toEqual([{ resource: 'depth', format: 'D32_Float', role: 'resource' }]);
+    expect(previewTargets(graph, 'res:$backbuffer')).toEqual([]);
+    expect(previewTargets(graph, 'pass:Lighting').map((t) => `${t.role}:${t.resource}`)).toEqual([
+      'output:sceneColor',
+      'input:gbAlbedo',
+      'input:gbNormal',
+      'input:depth',
+    ]);
+    expect(previewTargets(graph, 'pass:Composite').map((t) => t.resource)).toEqual(['sceneColor']);
+    const b = addResource(graph, 'buffer', [0, 0]);
+    expect(previewTargets(b.graph, `res:${b.name}`)).toEqual([]);
+    expect(previewTargets(graph, 'pass:None')).toEqual([]);
   });
 });

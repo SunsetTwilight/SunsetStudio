@@ -785,3 +785,65 @@ input.viewer-range {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* ---- ノードの結果の表示 (右クリック)、別ウィンドウ ---- */
+.rf-node-menu {
+  min-width: 280px;
+}
+.rf-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px;
+}
+.rf-menu-row .rf-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 4px;
+}
+.rf-menu-row button {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+}
+.rf-menu-role {
+  margin-right: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.rf-menu-note {
+  padding: 4px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.rf-menu .rf-menu-reset {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.chip.viewing {
+  border-color: var(--accent);
+}
+.chip button {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+}
+.viewport-floating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}

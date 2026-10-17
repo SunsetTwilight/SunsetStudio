@@ -72,6 +72,16 @@ void ViewportWindow::destroy()
 	m_visible = false;
 }
 
+void ViewportWindow::reparent(void* parent)
+{
+	if (!m_hwnd || !parent || parent == m_parent.load())
+		return;
+	ShowWindow(hwndOf(m_hwnd), SW_HIDE);
+	m_visible = false;
+	SetParent(hwndOf(m_hwnd), hwndOf(parent));
+	m_parent = parent;
+}
+
 void ViewportWindow::setRect(int x, int y, int width, int height, bool visible)
 {
 	if (!m_hwnd)

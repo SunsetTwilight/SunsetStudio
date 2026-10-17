@@ -13,22 +13,27 @@
 //             project.layout.get / project.layout.set / dialog.openProject / dialog.pickFolder   (プロジェクト、M4a)
 //             edit.undo / edit.redo / edit.state                               (編集の履歴、M4)
 //             viewer.get / viewer.set                                          (リソースビューアー、M4)
+//             preview.open / preview.set / preview.close / preview.list        (別ウィンドウのプレビュー、M4)
+//             viewport.float / viewport.state                                  (ビューポートを別ウィンドウにする、M4)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
 //             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった) /
 //             project.changed (プロジェクトを開いた / 閉じた) / edit.changed (履歴の状態) /
 //             pipeline.changed (元に戻す / やり直すでパイプラインが変わった) /
-//             viewer.pixel (リソースビューアーのピクセルの値と状態)
+//             viewer.pixel (リソースビューアーのピクセルの値と状態) /
+//             preview.changed (プレビューの一覧) / viewport.changed (ビューポートが別ウィンドウか)
 // ============================================================
 
 #include "host/WebHost.h"
 #include "services/Project.h"
 #include "services/UndoStack.h"
 #include "render/RenderThread.h"
+#include "viewport/FloatingWindow.h"
 #include "viewport/ViewportWindow.h"
 
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -67,6 +72,21 @@ private:
 	void registerProjectMethods();
 	void registerEditMethods();
 	void registerViewerMethods();
+	void registerWindowMethods();   // EditorWindows.cpp
+	// 書かれた項目だけを settings に入れる。値が不正なら false (error に理由)
+	static bool applyViewerPatch(const Json& patch, ResourceViewer::Settings& settings, std::string& error);
+	static Json viewerJson(const ResourceViewer::Settings& settings);
+
+	// ---- 別ウィンドウ (EditorWindows.cpp、UI スレッド) ----
+	Json previewsJson() const;
+	void emitPreviews();
+	void closePreview(uint32_t id);
+	void closeAllPreviews();
+	void onPreviewStatus(uint32_t id, const std::string& status);
+	// ビューポートを別ウィンドウにする / メインのウィンドウに戻す。x / y はスクリーン座標 (物理ピクセル、< 0 なら OS に任せる)
+	void floatViewport(bool floating, int x, int y, std::function<void(bool ok, const std::string& error)> done);
+	// 終了の前に、別ウィンドウのスワップチェーンを解放してからウィンドウを壊す
+	void releaseWindows(std::function<void()> done);
 	void recordEdit(UndoStack::Entry entry);   // 描画スレッドから呼んでよい (UI スレッドで履歴に入れる)
 	void emitEditState();                      // UI スレッドから呼ぶ
 	Json projectJson() const;
@@ -102,7 +122,7 @@ private:
 	bool     m_engineDone    = false;
 	bool     m_engineOk      = false;
 	uint64_t m_framesDrawn   = 0;
-	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, WaitAfter, Finished };
+	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, Windows, WaitAfter, Finished };
 	SmokeStage m_smokeStage    = SmokeStage::WaitProject;
 	bool       m_smokeProjectFailed = false;
 	std::filesystem::path m_smokeDir;   // スモークテストのプロジェクト (一時フォルダ。終了時に消す)
@@ -122,6 +142,24 @@ private:
 	bool                   m_viewerPinned = false;   // スモークテスト
 	std::chrono::steady_clock::time_point m_viewerCheckStart;
 	uint64_t   m_smokeFrameMark = 0;
+	int        m_smokeWindowStep = 0;
+	std::chrono::steady_clock::time_point m_smokeWindowStart;
+
+	// 別ウィンドウ (UI スレッドだけが触る)
+	struct PreviewEntry
+	{
+		uint32_t                        id = 0;
+		std::unique_ptr<FloatingWindow> window;
+		ResourceViewer::Settings        settings;
+		std::string                     status;
+		bool                            statusKnown = false;   // 描画スレッドから状態が届いた
+		bool                            closing     = false;
+	};
+	std::vector<PreviewEntry>       m_previews;
+	uint32_t                        m_nextPreviewId = 1;
+	std::unique_ptr<FloatingWindow> m_viewportFrame;   // ビューポートを入れた別ウィンドウ (なければメインのウィンドウの中)
+	bool                            m_viewportBusy = false;
+	struct { int x = 0, y = 0, w = 0, h = 0; bool visible = false; } m_viewportWebRect;   // Web のパネルの矩形 (戻すときに使う)
 	int      m_exitCode      = 0;
 };
 } // namespace studio

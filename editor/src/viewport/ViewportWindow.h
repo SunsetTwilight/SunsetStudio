@@ -41,11 +41,14 @@ public:
 	bool create(void* parent);
 	void destroy();
 
+	// 親を替える (メインのウィンドウ ⇔ 別ウィンドウ (FloatingWindow))。スワップチェーンを解放してから呼ぶこと
+	void reparent(void* parent);
+
 	// 親のクライアント座標 (物理ピクセル) に置く。幅か高さが 0、または visible = false なら隠す
 	void setRect(int x, int y, int width, int height, bool visible);
 
 	void*    nativeHandle() const { return m_hwnd; }
-	void*    parentHandle() const { return m_parent; }
+	void*    parentHandle() const { return m_parent.load(); }
 	uint32_t width()   const { return m_width.load(); }
 	uint32_t height()  const { return m_height.load(); }
 	bool     visible() const { return m_visible.load(); }
@@ -71,7 +74,7 @@ private:
 	void beginDrag(Drag mode, intptr_t lp);
 
 	void*                 m_hwnd   = nullptr;
-	void*                 m_parent = nullptr;
+	std::atomic<void*>    m_parent { nullptr };
 	std::atomic<uint32_t> m_width  { 0 };
 	std::atomic<uint32_t> m_height { 0 };
 	std::atomic_bool      m_visible { false };

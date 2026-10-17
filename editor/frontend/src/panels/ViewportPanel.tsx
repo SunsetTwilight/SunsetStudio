@@ -7,11 +7,12 @@
 //
 //  子ウィンドウは Web の UI より手前に出るので、ビューポートの上に UI を重ねられない。
 //  パネルをドラッグしているあいだ (ドロップ先の表示がビューポートに重なる) は隠す。
+//  ビューポートを別ウィンドウにしているあいだ (viewport.float) は、C++ は矩形を覚えるだけで、ここには案内を出す。
 // ============================================================
 import { useEffect, useRef } from 'react';
 import { call, isConnected } from '../bridge/client';
 import type { ViewportRect } from '../bridge/protocol';
-import { useStudio } from '../state/store';
+import { studioStore, useStudio } from '../state/store';
 
 function sameRect(a: ViewportRect | null, b: ViewportRect): boolean {
   return (
@@ -28,6 +29,7 @@ function sameRect(a: ViewportRect | null, b: ViewportRect): boolean {
 export function ViewportPanel() {
   const ref = useRef<HTMLDivElement>(null);
   const engine = useStudio((s) => s.engine);
+  const floating = useStudio((s) => s.viewportFloating);
 
   useEffect(() => {
     if (!isConnected()) return;
@@ -71,12 +73,25 @@ export function ViewportPanel() {
       document.removeEventListener('drop', onDragEnd, true);
       call('viewport.setRect', { x: 0, y: 0, width: 0, height: 0, dpr: 1, visible: false }).catch(() => {});
     };
-  }, []);
+  }, [floating]); // 別ウィンドウから戻ったら、矩形を送り直す
 
   return (
     <div className="viewport" data-viewport ref={ref}>
       <div className="placeholder">
-        {!isConnected()
+        {floating ? (
+          <div className="viewport-floating">
+            ビューポートは別ウィンドウに表示しています
+            <button
+              onClick={() =>
+                void call('viewport.float', { floating: false })
+                  .then((r) => studioStore.setViewportFloating(r.floating))
+                  .catch(() => {})
+              }
+            >
+              ここに戻す
+            </button>
+          </div>
+        ) : !isConnected()
           ? '3D ビューポート (エディターの中で表示されます)'
           : engine?.status === 'failed'
             ? `エンジンを初期化できませんでした: ${engine.error ?? ''}`

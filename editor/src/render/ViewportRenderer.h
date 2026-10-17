@@ -53,6 +53,11 @@ public:
 	void render(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height, const OrbitCamera& camera,
 	            int cursorX = -1, int cursorY = -1);
 
+	// render のあとで、プレビューのウィンドウ (rt) に settings のリソースを描いて submit する。表示できなければ status に理由
+	void drawPreview(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height,
+	                 const ResourceViewer::Settings& settings, ResourceViewer::ViewCache& cache, const OrbitCamera& camera,
+	                 std::string& status);
+
 	ResourceViewer& viewer() { return m_viewer; }
 	bool            viewerOk() const { return m_viewerOk; }
 

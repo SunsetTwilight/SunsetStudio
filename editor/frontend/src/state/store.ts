@@ -3,7 +3,7 @@
 //  パネルは dockview の中で別々に描かれるので、props ではなくここから読む (useStudio)。
 // ============================================================
 import { useSyncExternalStore } from 'react';
-import type { AppInfo, EditState, EngineInfo, FrameStats, GraphInfo, LogEntry, ProjectInfo, ViewerPixel, ViewerSettings } from '../bridge/protocol';
+import type { AppInfo, EditState, EngineInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, ViewerPixel, ViewerSettings } from '../bridge/protocol';
 
 // インスペクターに表示するもの (グラフのパネルで選ぶ)
 export type Selection =
@@ -23,11 +23,13 @@ export interface StudioState {
   edit: EditState | null; // 編集の履歴の状態
   viewer: ViewerSettings | null; // リソースビューアーの設定
   viewerPixel: ViewerPixel | null;
+  previews: PreviewInfo[]; // 別ウィンドウのプレビュー
+  viewportFloating: boolean; // ビューポートを別ウィンドウにしている
 }
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -56,6 +58,8 @@ export const studioStore = {
   setEdit: (edit: EditState) => set({ edit }),
   setViewer: (viewer: ViewerSettings) => set({ viewer }),
   setViewerPixel: (viewerPixel: ViewerPixel) => set({ viewerPixel }),
+  setPreviews: (previews: PreviewInfo[]) => set({ previews }),
+  setViewportFloating: (viewportFloating: boolean) => set({ viewportFloating }),
   // プロジェクトが変わったら、前のプロジェクトのグラフと選択と統計は捨てる
   setProject: (project: ProjectInfo) =>
     set(

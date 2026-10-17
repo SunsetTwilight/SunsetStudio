@@ -43,6 +43,7 @@ add_executable(SunsetEditor
     src/main.cpp
     src/app/EditorApp.h
     src/app/EditorApp.cpp
+    src/app/EditorWindows.cpp
     src/host/WebHost.h
     src/host/WebHost.cpp
     src/host/FileDialog.h
@@ -56,6 +57,8 @@ add_executable(SunsetEditor
     src/render/ResourceViewer.cpp
     src/viewport/ViewportWindow.h
     src/viewport/ViewportWindow_win32.cpp
+    src/viewport/FloatingWindow.h
+    src/viewport/FloatingWindow_win32.cpp
 )
 target_include_directories(SunsetEditor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(SunsetEditor PRIVATE

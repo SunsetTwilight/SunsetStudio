@@ -175,6 +175,13 @@ export interface EditState {
 }
 
 // ---- リソースビューアー ----
+// 別ウィンドウのプレビュー (preview.*)
+export interface PreviewInfo {
+  id: number;
+  resource: string;
+  status: string; // 表示できない理由 (空なら表示できている)
+}
+
 export interface ViewerSettings {
   enabled: boolean;
   resource: string;
@@ -226,7 +233,13 @@ export interface Methods {
   'ui.ready': { params: Record<string, never>; result: { protocol: number } };
   'app.info': { params: Record<string, never>; result: AppInfo };
   'app.ping': { params: unknown; result: { echo: unknown; uptimeMs: number } };
-  'viewport.setRect': { params: ViewportRect; result: { width: number; height: number; visible: boolean } };
+  'viewport.setRect': { params: ViewportRect; result: { width: number; height: number; visible: boolean; floating?: boolean } };
+  'viewport.state': { params: Record<string, never>; result: { floating: boolean } };
+  'viewport.float': { params: { floating: boolean; x?: number; y?: number; dpr?: number }; result: { floating: boolean } };
+  'preview.open': { params: Partial<ViewerSettings> & { resource: string; x?: number; y?: number; dpr?: number }; result: { id: number } };
+  'preview.set': { params: Partial<ViewerSettings> & { id: number }; result: ViewerSettings };
+  'preview.close': { params: { id: number }; result: { previews: PreviewInfo[] } };
+  'preview.list': { params: Record<string, never>; result: { previews: PreviewInfo[] } };
 }
 
 // C++ → JS (studio.on)
@@ -239,4 +252,6 @@ export interface Events {
   'edit.changed': EditState;
   'pipeline.changed': { id: string };
   'viewer.pixel': ViewerPixel;
+  'preview.changed': { previews: PreviewInfo[] };
+  'viewport.changed': { floating: boolean };
 }

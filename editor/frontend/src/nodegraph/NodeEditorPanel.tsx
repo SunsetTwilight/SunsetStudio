@@ -5,6 +5,8 @@
 //           線は 書く (パス → リソース、橙) と 読む (リソース → パス、灰)。ラベルは使い方 (RTV0 / SRV など)
 //    編集   ドラッグで移動 (位置はグラフの editor に保存)、ハンドルどうしをつなぐ (入力 / 出力を加える・差し替える)、
 //           Delete で線 / ノードを消す、右クリックでパス / リソースを加える、クリックでインスペクターに表示
+//    結果   ノードを右クリック → そのノードの結果 (リソースならそれ自身、パスなら出力 / 入力のテクスチャ) だけを
+//           ビューポートに表示する (リソースビューアー)、または別ウィンドウに表示する (preview.open)
 //    操作   自動配置 (dagre)、全体を表示
 //  編集はすべてグラフ全体の JSON を graph.set で送る (コンパイルできなければエラーで前のまま、元に戻す / やり直すが効く)。
 // ============================================================
@@ -25,6 +27,8 @@ import {
 import '@xyflow/react/dist/style.css';
 import { isConnected } from '../bridge/client';
 import type { GraphInfo, JsonObject } from '../bridge/protocol';
+import { setViewer, showInViewer, openPreview } from '../panels/ViewerPanel';
+import { showPanel } from '../state/dock';
 import { applyGraph } from '../state/graph';
 import { studioStore, useStudio } from '../state/store';
 import {
@@ -34,11 +38,13 @@ import {
   buildModel,
   connect,
   parseNodeId,
+  previewTargets,
   removeEdges,
   removeNodes,
   savedPositions,
   withPositions,
   type PassKind,
+  type PreviewTarget,
   type XY,
 } from './model';
 import { nodeTypes, type NodeRuntime } from './nodes';
@@ -89,6 +95,9 @@ function NodeEditor() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [status, setStatus] = useState<Status>({ kind: 'idle', text: '' });
   const [menu, setMenu] = useState<{ x: number; y: number; at: XY } | null>(null);
+  // ノードの右クリックのメニュー (screen は別ウィンドウを出す場所)
+  const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; screen: { x: number; y: number } } | null>(null);
+  const viewer = useStudio((s) => s.viewer);
   const wrapper = useRef<HTMLDivElement>(null);
   const fitted = useRef(false);
 
@@ -219,6 +228,30 @@ function NodeEditor() {
     [flow],
   );
 
+  // ---- ノードの結果を表示する (右クリックのメニュー) ----
+  const onNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
+    e.preventDefault();
+    const rect = wrapper.current?.getBoundingClientRect();
+    setMenu(null);
+    setNodeMenu({ x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0), nodeId: node.id, screen: { x: e.screenX, y: e.screenY } });
+    const n = parseNodeId(node.id);
+    if (n) studioStore.select({ kind: n.kind, name: n.name });
+  }, []);
+
+  const showInViewport = (t: PreviewTarget) => {
+    setNodeMenu(null);
+    showInViewer(t.resource, t.format);
+    if (!studioStore.get().viewportFloating) showPanel('viewport');
+    setStatus({ kind: 'ok', text: `ビューポートに ${t.resource} を表示 (ツールバーの ✕ で最終出力に戻す)` });
+  };
+  const showInWindow = (t: PreviewTarget, at: { x: number; y: number }) => {
+    setNodeMenu(null);
+    void openPreview(t.resource, t.format, at).then((err) =>
+      setStatus(err ? { kind: 'error', text: err } : { kind: 'ok', text: `${t.resource} を別ウィンドウに表示` }),
+    );
+  };
+  const ROLE_LABEL: Record<PreviewTarget['role'], string> = { resource: '', output: '出力', input: '入力' };
+
   const centerOfView = (): XY => {
     const rect = wrapper.current?.getBoundingClientRect();
     const p = flow.screenToFlowPosition({ x: (rect?.left ?? 0) + (rect?.width ?? 400) / 2, y: (rect?.top ?? 0) + (rect?.height ?? 300) / 2 });
@@ -242,7 +275,14 @@ function NodeEditor() {
   if (!graph) return <div className="panel"><div className="placeholder">プロジェクトのグラフを待っています…</div></div>;
 
   return (
-    <div className="panel node-editor" ref={wrapper} onClick={() => menu && setMenu(null)}>
+    <div
+      className="panel node-editor"
+      ref={wrapper}
+      onClick={() => {
+        if (menu) setMenu(null);
+        if (nodeMenu) setNodeMenu(null);
+      }}
+    >
       <header className="panel-header">
         <span className="panel-title">ノードエディター</span>
         <span className="spacer" />
@@ -263,8 +303,15 @@ function NodeEditor() {
           isValidConnection={isValidConnection}
           onDelete={onDelete}
           onNodeClick={onNodeClick}
-          onPaneClick={() => setMenu(null)}
-          onPaneContextMenu={onPaneContextMenu}
+          onPaneClick={() => {
+            setMenu(null);
+            setNodeMenu(null);
+          }}
+          onPaneContextMenu={(e) => {
+            setNodeMenu(null);
+            onPaneContextMenu(e);
+          }}
+          onNodeContextMenu={onNodeContextMenu}
           deleteKeyCode={['Delete', 'Backspace']}
           colorMode="dark"
           minZoom={0.2}
@@ -283,6 +330,40 @@ function NodeEditor() {
             <div className="rf-menu-title">リソースを追加</div>
             <button onClick={() => doAddResource('texture', menu.at)}>テクスチャ</button>
             <button onClick={() => doAddResource('buffer', menu.at)}>バッファ</button>
+          </div>
+        )}
+        {nodeMenu && (
+          <div className="rf-menu rf-node-menu" style={{ left: nodeMenu.x, top: nodeMenu.y }} onClick={(e) => e.stopPropagation()}>
+            <div className="rf-menu-title">{nodeMenu.nodeId.replace(/^\w+:/, '')} の結果を表示</div>
+            {(() => {
+              const targets = previewTargets(graph.graph, nodeMenu.nodeId);
+              if (targets.length === 0) return <div className="rf-menu-note">表示できるテクスチャがありません (インポートとバッファは表示できません)</div>;
+              return targets.map((t) => (
+                <div key={t.resource} className="rf-menu-row">
+                  <span className="rf-menu-label" title={t.format}>
+                    {ROLE_LABEL[t.role] && <span className="rf-menu-role">{ROLE_LABEL[t.role]}</span>}
+                    {t.resource}
+                  </span>
+                  <button onClick={() => showInViewport(t)} title="ビューポートに、最終出力の代わりにこのテクスチャを表示する">
+                    ビューポート
+                  </button>
+                  <button onClick={() => showInWindow(t, nodeMenu.screen)} title="このテクスチャを別ウィンドウに表示する">
+                    別ウィンドウ
+                  </button>
+                </div>
+              ));
+            })()}
+            {viewer?.enabled && (
+              <button
+                className="rf-menu-reset"
+                onClick={() => {
+                  setNodeMenu(null);
+                  void setViewer({ enabled: false });
+                }}
+              >
+                ビューポートを最終出力に戻す
+              </button>
+            )}
           </div>
         )}
       </div>

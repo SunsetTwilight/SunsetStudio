@@ -90,6 +90,43 @@ function sizeText(r: JsonObject): string {
   return '';
 }
 
+// ---- ノードの結果を表示する (右クリックのメニュー) ----
+export interface PreviewTarget {
+  resource: string;
+  format: string;
+  role: 'resource' | 'output' | 'input';
+}
+
+// ノードの結果として表示できるテクスチャ。リソースならそれ自身、パスなら出力 (書いたもの) と入力。
+// インポート ($...) とバッファは表示できないので除く
+export function previewTargets(graph: JsonObject, nodeId: string): PreviewTarget[] {
+  const n = parseNodeId(nodeId);
+  if (!n) return [];
+  const resources = asObject(graph.resources);
+  const textureOf = (name: string): string | null => {
+    if (name.startsWith('$')) return null;
+    const r = asObject(resources[name]);
+    if (resources[name] === undefined || String(r.kind ?? 'texture') !== 'texture') return null;
+    return String(r.format ?? '');
+  };
+  if (n.kind === 'resource') {
+    const f = textureOf(n.name);
+    return f === null ? [] : [{ resource: n.name, format: f, role: 'resource' }];
+  }
+  const pass = passesOf(graph).find((p) => String(p.name ?? '') === n.name);
+  if (!pass) return [];
+  const out: PreviewTarget[] = [];
+  const seen = new Set<string>();
+  for (const [key, role] of [['outputs', 'output'], ['inputs', 'input']] as const)
+    for (const r of refsOf(pass, key)) {
+      const f = textureOf(r.res);
+      if (f === null || seen.has(r.res)) continue;
+      seen.add(r.res);
+      out.push({ resource: r.res, format: f, role });
+    }
+  return out;
+}
+
 // ---- グラフ → ノードと線 (位置はまだ付けない) ----
 export interface ModelNode {
   id: string;
