@@ -20,6 +20,7 @@ import { GraphPanel } from './panels/GraphPanel';
 import { InspectorPanel } from './panels/InspectorPanel';
 import { LogPanel } from './panels/LogPanel';
 import { StartScreen } from './panels/StartScreen';
+import { PreviewPanel, type PreviewParams } from './panels/PreviewPanel';
 import { setViewer, ViewerPanel } from './panels/ViewerPanel';
 import { NodeEditorPanel } from './nodegraph/NodeEditorPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
@@ -34,6 +35,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   log: () => <LogPanel />,
   viewer: () => <ViewerPanel />,
   nodes: () => <NodeEditorPanel />,
+  preview: (props) => <PreviewPanel {...(props as IDockviewPanelProps<PreviewParams>)} />,
 };
 
 // 既定のレイアウト
@@ -141,7 +143,7 @@ export function App() {
   const project = useStudio((s) => s.project);
   const editState = useStudio((s) => s.edit);
   const viewer = useStudio((s) => s.viewer);
-  const previews = useStudio((s) => s.previews);
+  const previews = useStudio((s) => s.previews).filter((p) => p.mode === 'window'); // タブのプレビューはパネルに出ている
   const floating = useStudio((s) => s.viewportFloating);
 
   // プロジェクトを開いたら、ビューアー / プレビュー / ビューポートの状態を読む (ツールバーに出す)

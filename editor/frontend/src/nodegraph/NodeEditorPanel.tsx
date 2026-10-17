@@ -6,7 +6,7 @@
 //    編集   ドラッグで移動 (位置はグラフの editor に保存)、ハンドルどうしをつなぐ (入力 / 出力を加える・差し替える)、
 //           Delete で線 / ノードを消す、右クリックでパス / リソースを加える、クリックでインスペクターに表示
 //    結果   ノードを右クリック → そのノードの結果 (リソースならそれ自身、パスなら出力 / 入力のテクスチャ) だけを
-//           ビューポートに表示する (リソースビューアー)、または別ウィンドウに表示する (preview.open)
+//           ビューポートに表示する (リソースビューアー)、タブに表示する、または別ウィンドウに表示する (preview.open)
 //    操作   自動配置 (dagre)、全体を表示
 //  編集はすべてグラフ全体の JSON を graph.set で送る (コンパイルできなければエラーで前のまま、元に戻す / やり直すが効く)。
 // ============================================================
@@ -28,7 +28,7 @@ import '@xyflow/react/dist/style.css';
 import { isConnected } from '../bridge/client';
 import type { GraphInfo, JsonObject } from '../bridge/protocol';
 import { setViewer, showInViewer, openPreview } from '../panels/ViewerPanel';
-import { showPanel } from '../state/dock';
+import { openPreviewTab, showPanel } from '../state/dock';
 import { applyGraph } from '../state/graph';
 import { studioStore, useStudio } from '../state/store';
 import {
@@ -250,6 +250,11 @@ function NodeEditor() {
       setStatus(err ? { kind: 'error', text: err } : { kind: 'ok', text: `${t.resource} を別ウィンドウに表示` }),
     );
   };
+  const showInTab = (t: PreviewTarget) => {
+    setNodeMenu(null);
+    openPreviewTab(t.resource, t.format);
+    setStatus({ kind: 'ok', text: `${t.resource} をタブに表示` });
+  };
   const ROLE_LABEL: Record<PreviewTarget['role'], string> = { resource: '', output: '出力', input: '入力' };
 
   const centerOfView = (): XY => {
@@ -346,6 +351,9 @@ function NodeEditor() {
                   </span>
                   <button onClick={() => showInViewport(t)} title="ビューポートに、最終出力の代わりにこのテクスチャを表示する">
                     ビューポート
+                  </button>
+                  <button onClick={() => showInTab(t)} title="このテクスチャをタブ (パネル) に表示する。タブはドラッグで並べ替え / ウィンドウの外へ出せる">
+                    タブ
                   </button>
                   <button onClick={() => showInWindow(t, nodeMenu.screen)} title="このテクスチャを別ウィンドウに表示する">
                     別ウィンドウ

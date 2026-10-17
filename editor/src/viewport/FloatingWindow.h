@@ -6,6 +6,7 @@
 //    ・プレビュー: レンダーグラフのリソースを別ウィンドウで表示する (エンジンがこのウィンドウにスワップチェーンを作る)
 //    ・ビューポート: ビューポートの子ウィンドウ (ViewportWindow) をこの中に移して、別ウィンドウにする
 //  メインのウィンドウを owner にするので、メインより手前に出て、メインを最小化すると一緒に隠れる。
+//  createChild で作ると、メインのウィンドウの子 (タブのパネルの矩形に重ねる。ビューポートと同じ方式) になる。
 //
 //  ×ボタンではウィンドウを壊さず、onClose を呼ぶだけ (スワップチェーンを解放してから destroy すること)。
 //
@@ -37,6 +38,11 @@ public:
 	// owner はメインのウィンドウ (Win32 では HWND)。x / y はスクリーン座標 (物理ピクセル)、x < 0 なら OS に任せる。
 	// width / height はクライアント領域の大きさ。作ったら表示する
 	bool create(void* owner, const std::string& titleUtf8, int x, int y, int width, int height, Callbacks callbacks);
+	// メインのウィンドウの子として作る (最初は非表示)。setRect で Web のパネルの矩形に合わせる
+	bool createChild(void* parent, Callbacks callbacks);
+	// 子のとき: 親のクライアント座標 (物理ピクセル) に置く。幅か高さが 0、または visible = false なら隠す
+	void setRect(int x, int y, int width, int height, bool visible);
+	bool isChild() const { return m_child; }
 	void destroy();
 
 	void setTitle(const std::string& titleUtf8);
@@ -56,5 +62,6 @@ private:
 	std::atomic<uint32_t> m_width  { 0 };
 	std::atomic<uint32_t> m_height { 0 };
 	Callbacks             m_callbacks;
+	bool                  m_child = false;
 };
 } // namespace studio

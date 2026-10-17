@@ -726,19 +726,40 @@ void EditorApp::checkSmokeTest()
 				m_host.post([this, finish, status, r] {
 					if (status != 0)
 						return finish(10, "preview.open: " + r.dump());
-					m_smokeWindowStep = 2;
+					// タブのプレビュー (メインのウィンドウの子) も、決まった矩形に開く
+					m_host.bridge().callLocal("preview.open", { { "resource", "depth" }, { "mode", "panel" }, { "depthLinear", true }, { "rangeMax", 50.0f } },
+						[this, finish](int status2, const Json& r2) {
+							m_host.post([this, finish, status2, r2] {
+								if (status2 != 0)
+									return finish(10, "preview.open (panel): " + r2.dump());
+								m_host.bridge().callLocal("preview.setRect",
+									{ { "id", r2.at("id") }, { "x", 0 }, { "y", 0 }, { "width", 240 }, { "height", 160 }, { "dpr", 1.0 } },
+									[this, finish](int status3, const Json& r3) {
+										m_host.post([this, finish, status3, r3] {
+											if (status3 != 0)
+												return finish(10, "preview.setRect: " + r3.dump());
+											m_smokeWindowStep = 2;
+										});
+									});
+							});
+						});
 				});
 			});
 			return;
 		case 2:
 		{
-			// プレビューが描けた (表示できない理由が空) ことが描画スレッドから届くまで待つ
-			const auto it = std::find_if(m_previews.begin(), m_previews.end(), [](const PreviewEntry& e) { return e.statusKnown; });
-			if (it == m_previews.end())
+			// 2 つのプレビューが描けた (表示できない理由が空) ことが描画スレッドから届くまで待つ
+			size_t known = 0;
+			for (const auto& e : m_previews)
+				if (e.statusKnown)
+				{
+					if (!e.status.empty())
+						return finish(10, "プレビューを表示できない: " + e.settings.resource + ": " + e.status);
+					++known;
+				}
+			if (known < 2)
 				return;
-			if (!it->status.empty())
-				return finish(10, "プレビューを表示できない: " + it->status);
-			log("info", "smoke", "preview: gbAlbedo を別ウィンドウに表示");
+			log("info", "smoke", "preview: gbAlbedo を別ウィンドウに、depth をタブに表示");
 			m_smokeWindowStep = 3;
 			floatViewport(true, -1, -1, [this, finish](bool ok, const std::string& error) {
 				if (!ok)

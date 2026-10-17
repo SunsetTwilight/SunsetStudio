@@ -156,7 +156,7 @@ export function ViewerPanel() {
 }
 
 // リソースの種類に合わせた既定の表示
-function defaultsFor(resource: string, format: string): Partial<ViewerSettings> {
+export function defaultsFor(resource: string, format: string): Partial<ViewerSettings> {
   const depth = format.startsWith('D');
   return {
     resource,

@@ -180,6 +180,7 @@ export interface PreviewInfo {
   id: number;
   resource: string;
   status: string; // 表示できない理由 (空なら表示できている)
+  mode: 'window' | 'panel'; // 別ウィンドウ / タブのパネル
 }
 
 export interface ViewerSettings {
@@ -236,7 +237,11 @@ export interface Methods {
   'viewport.setRect': { params: ViewportRect; result: { width: number; height: number; visible: boolean; floating?: boolean } };
   'viewport.state': { params: Record<string, never>; result: { floating: boolean } };
   'viewport.float': { params: { floating: boolean; x?: number; y?: number; dpr?: number }; result: { floating: boolean } };
-  'preview.open': { params: Partial<ViewerSettings> & { resource: string; x?: number; y?: number; dpr?: number }; result: { id: number } };
+  'preview.open': {
+    params: Partial<ViewerSettings> & { resource: string; mode?: 'window' | 'panel'; x?: number; y?: number; dpr?: number };
+    result: { id: number };
+  };
+  'preview.setRect': { params: ViewportRect & { id: number }; result: Record<string, never> };
   'preview.set': { params: Partial<ViewerSettings> & { id: number }; result: ViewerSettings };
   'preview.close': { params: { id: number }; result: { previews: PreviewInfo[] } };
   'preview.list': { params: Record<string, never>; result: { previews: PreviewInfo[] } };

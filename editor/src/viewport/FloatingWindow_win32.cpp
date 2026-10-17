@@ -101,6 +101,37 @@ bool FloatingWindow::create(void* owner, const std::string& titleUtf8, int x, in
 	return true;
 }
 
+bool FloatingWindow::createChild(void* parent, Callbacks callbacks)
+{
+	if (m_hwnd.load() || !parent || !registerClass())
+		return false;
+	m_callbacks = std::move(callbacks);
+	m_child     = true;
+	// WS_CLIPSIBLINGS: 兄弟 (WebView、ビューポート) と重なった部分を描かせない
+	HWND h = CreateWindowExW(0, k_ClassName, L"Preview", WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+		0, 0, 1, 1, hwndOf(parent), nullptr, GetModuleHandleW(nullptr), this);
+	if (!h)
+		return false;
+	m_hwnd = h;
+	return true;
+}
+
+void FloatingWindow::setRect(int x, int y, int width, int height, bool visible)
+{
+	void* h = m_hwnd.load();
+	if (!h || !m_child)
+		return;
+	if (visible && width > 0 && height > 0)
+	{
+		// WebView より手前に置く (WebView が並びを変えることがあるので毎回指定する)
+		SetWindowPos(hwndOf(h), HWND_TOP, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+		m_width  = static_cast<uint32_t>(width);
+		m_height = static_cast<uint32_t>(height);
+	}
+	else
+		ShowWindow(hwndOf(h), SW_HIDE);
+}
+
 void FloatingWindow::destroy()
 {
 	if (void* h = m_hwnd.exchange(nullptr))
@@ -130,7 +161,8 @@ void FloatingWindow::focus()
 bool FloatingWindow::drawable() const
 {
 	void* h = m_hwnd.load();
-	return h && IsWindowVisible(hwndOf(h)) && !IsIconic(hwndOf(h)) && m_width.load() > 0 && m_height.load() > 0;
+	// IsWindowVisible は親も見る。子のときは、トップレベルのウィンドウが最小化されていないかも見る
+	return h && IsWindowVisible(hwndOf(h)) && !IsIconic(GetAncestor(hwndOf(h), GA_ROOT)) && m_width.load() > 0 && m_height.load() > 0;
 }
 
 intptr_t FloatingWindow::handleMessage(unsigned msg, uintptr_t, intptr_t lp, bool& handled)
@@ -159,6 +191,8 @@ intptr_t FloatingWindow::handleMessage(unsigned msg, uintptr_t, intptr_t lp, boo
 			m_callbacks.resize(w, h);
 		return 0;
 	}
+	case WM_MOUSEACTIVATE:
+		return m_child ? MA_NOACTIVATE : MA_ACTIVATE;
 	case WM_CLOSE:
 		if (m_callbacks.close)
 			m_callbacks.close();   // 後片付けのあとで destroy される

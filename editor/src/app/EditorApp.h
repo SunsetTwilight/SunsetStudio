@@ -13,7 +13,8 @@
 //             project.layout.get / project.layout.set / dialog.openProject / dialog.pickFolder   (プロジェクト、M4a)
 //             edit.undo / edit.redo / edit.state                               (編集の履歴、M4)
 //             viewer.get / viewer.set                                          (リソースビューアー、M4)
-//             preview.open / preview.set / preview.close / preview.list        (別ウィンドウのプレビュー、M4)
+//             preview.open / preview.set / preview.setRect / preview.close / preview.list
+//                                                                              (プレビュー: 別ウィンドウ / タブ、M4)
 //             viewport.float / viewport.state                                  (ビューポートを別ウィンドウにする、M4)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
 //             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった) /

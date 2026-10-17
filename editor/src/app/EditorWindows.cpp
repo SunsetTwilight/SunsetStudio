@@ -2,8 +2,10 @@
 //  editor/src/app/EditorWindows.cpp
 //
 //  メインのウィンドウから切り離す、ネイティブの別ウィンドウ (M4)。
-//    プレビュー     preview.open / preview.set / preview.close / preview.list、イベント preview.changed
-//                   グラフのリソース 1 つを、それ専用のウィンドウに表示する (ノードエディターの右クリックなど)
+//    プレビュー     preview.open / preview.set / preview.setRect / preview.close / preview.list、イベント preview.changed
+//                   グラフのリソース 1 つを、それ専用のウィンドウに表示する (ノードエディターの右クリックなど)。
+//                   mode = "window" はトップレベルの別ウィンドウ、"panel" はメインのウィンドウの子 (タブのパネルの
+//                   矩形に preview.setRect で合わせる。ビューポートと同じ方式)
 //    ビューポート   viewport.float / viewport.state、イベント viewport.changed
 //                   ビューポートの子ウィンドウを別ウィンドウ (FloatingWindow) に移す / 戻す
 //  ウィンドウは UI スレッドで作って壊す。スワップチェーンは描画スレッドが持つので、
@@ -43,7 +45,8 @@ Json EditorApp::previewsJson() const
 	Json list = Json::array();
 	for (const auto& e : m_previews)
 		if (!e.closing)
-			list.push_back({ { "id", e.id }, { "resource", e.settings.resource }, { "status", e.status } });
+			list.push_back({ { "id", e.id }, { "resource", e.settings.resource }, { "status", e.status },
+			                 { "mode", e.window->isChild() ? "panel" : "window" } });
 	return { { "previews", list } };
 }
 
@@ -86,7 +89,8 @@ void EditorApp::onPreviewStatus(uint32_t id, const std::string& status)
 	it->statusKnown = true;
 	if (changed)
 	{
-		it->window->setTitle(previewTitle(it->settings, status));
+		if (!it->window->isChild())
+			it->window->setTitle(previewTitle(it->settings, status));
 		emitPreviews();
 	}
 	checkSmokeTest();
@@ -186,8 +190,13 @@ void EditorApp::registerWindowMethods()
 			return r.error(BridgeError::InvalidParams, "resource がありません");
 		s.enabled = true;
 		s.pinX = s.pinY = -1;
+		const std::string mode = p.value("mode", "window");
+		if (mode != "window" && mode != "panel")
+			return r.error(BridgeError::InvalidParams, "mode は window か panel です");
+		const bool panel = mode == "panel";
+		// 別ウィンドウは同じリソースなら 1 つにする (タブはパネルごとに別)
 		for (auto& e : m_previews)
-			if (!e.closing && e.settings.resource == s.resource)
+			if (!panel && !e.closing && !e.window->isChild() && e.settings.resource == s.resource)
 			{
 				e.settings = s;
 				m_render.setPreview(e.id, s);
@@ -210,7 +219,9 @@ void EditorApp::registerWindowMethods()
 		FloatingWindow::Callbacks cb;
 		cb.close  = [this, id] { closePreview(id); };
 		cb.resize = [this](uint32_t, uint32_t) { m_render.wake(); };
-		if (!entry.window->create(m_host.nativeWindow(), previewTitle(s, {}), x, y, w, h, std::move(cb)))
+		const bool created = panel ? entry.window->createChild(m_host.nativeWindow(), std::move(cb))
+		                           : entry.window->create(m_host.nativeWindow(), previewTitle(s, {}), x, y, w, h, std::move(cb));
+		if (!created)
 			return r.error(BridgeError::Internal, "プレビューのウィンドウを作れません");
 		m_render.addPreview(id, entry.window.get(), s);
 		m_previews.push_back(std::move(entry));
@@ -235,6 +246,30 @@ void EditorApp::registerWindowMethods()
 		m_render.setPreview(id, s);
 		emitPreviews();
 		r.ok(viewerJson(s));
+	});
+
+	// タブのプレビュー: Web のパネルの矩形 (WebView のクライアント座標の CSS px) と dpr。viewport.setRect と同じ形
+	b.registerMethod("preview.setRect", [this](const Json& p, Bridge::Reply r) {
+		const uint32_t id = p.value("id", 0u);
+		const auto it = std::find_if(m_previews.begin(), m_previews.end(), [id](const PreviewEntry& e) { return e.id == id && !e.closing; });
+		if (it == m_previews.end() || !it->window->isChild())
+			return r.error(BridgeError::InvalidParams, "そのタブのプレビューはありません");
+		try
+		{
+			const double dpr = p.value("dpr", 1.0);
+			const double fx = p.at("x").get<double>(), fy = p.at("y").get<double>();
+			const int x  = static_cast<int>(std::lround(fx * dpr));
+			const int y  = static_cast<int>(std::lround(fy * dpr));
+			const int x2 = static_cast<int>(std::lround((fx + p.at("width").get<double>()) * dpr));
+			const int y2 = static_cast<int>(std::lround((fy + p.at("height").get<double>()) * dpr));
+			it->window->setRect(x, y, std::max(0, x2 - x), std::max(0, y2 - y), p.value("visible", true));
+		}
+		catch (const std::exception& e)
+		{
+			return r.error(BridgeError::InvalidParams, std::string("値が不正です: ") + e.what());
+		}
+		m_render.wake();
+		r.ok(Json::object());
 	});
 
 	b.registerMethod("preview.close", [this](const Json& p, Bridge::Reply r) {

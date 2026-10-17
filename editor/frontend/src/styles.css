@@ -847,3 +847,18 @@ input.viewer-range {
   align-items: center;
   gap: 8px;
 }
+
+/* ---- プレビューのパネル (タブ) ---- */
+.preview-panel {
+  display: flex;
+  flex-direction: column;
+}
+.preview-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.preview-area .placeholder {
+  position: absolute;
+  inset: 0;
+}

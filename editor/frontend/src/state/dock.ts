@@ -5,6 +5,7 @@
 //    popoutPanel    パネルを別ウィンドウにする。Web のパネルは dockview の popout (WebView2 の window.open)、
 //                   ビューポートはネイティブの子ウィンドウなので、C++ が別ウィンドウに移す (viewport.float)
 //    watchDragOut   タブをウィンドウの外へドラッグして離したら、そのパネルを別ウィンドウにする
+//    openPreviewTab リソースのプレビューをタブ (パネル) で開く。外へ出すとネイティブの別ウィンドウにする
 // ============================================================
 import type { DockviewApi } from 'dockview-react';
 import { call, isConnected } from '../bridge/client';
@@ -78,12 +79,62 @@ function patchWindowOpen() {
   };
 }
 
+function defaultsForPreview(format: string) {
+  const depth = format.startsWith('D');
+  return { channels: depth ? 0x1 : 0x7, depthLinear: depth, rangeMin: 0, rangeMax: depth ? 50 : 1, exposure: 0, gamma: !depth, mip: 0, pin: null };
+}
+
 function logError(text: string) {
   studioStore.addLog({ timeMs: performance.now(), level: 'error', source: 'ui', id: 0, text });
 }
 
+export const PREVIEW_PREFIX = 'preview:';
+
+// リソースのプレビューをタブで開く。同じリソースのタブがあれば前に出す。
+// 置き場所: ほかのプレビューのタブがあればその隣 (同じグループ)、なければビューポートの右
+export function openPreviewTab(resource: string, format: string) {
+  if (!dockApi) return;
+  const id = PREVIEW_PREFIX + resource;
+  const existing = dockApi.getPanel(id);
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+  const other = dockApi.panels.find((p) => p.id.startsWith(PREVIEW_PREFIX));
+  const viewport = dockApi.getPanel('viewport');
+  dockApi.addPanel({
+    id,
+    component: 'preview',
+    title: `プレビュー: ${resource}`,
+    params: { resource, format },
+    position: other
+      ? { referencePanel: other.id, direction: 'within' }
+      : viewport
+        ? { referencePanel: viewport.id, direction: 'right' }
+        : undefined,
+    initialWidth: 420,
+  });
+}
+
 // at はスクリーン座標 (CSS px)。窓のタイトルバーのあたりがそこに来るように置く
 export async function popoutPanel(id: string, at?: { x: number; y: number }): Promise<void> {
+  if (id.startsWith(PREVIEW_PREFIX)) {
+    // プレビューのタブはネイティブの子ウィンドウなので、dockview の popout ではなく、ネイティブの別ウィンドウで開き直す
+    const panel = dockApi?.getPanel(id);
+    const params = (panel?.params ?? {}) as { resource?: string; format?: string };
+    if (!panel || !params.resource || !isConnected()) return;
+    try {
+      await call('preview.open', {
+        resource: params.resource,
+        ...defaultsForPreview(params.format ?? ''),
+        ...(at ? { x: at.x, y: at.y, dpr: window.devicePixelRatio || 1 } : {}),
+      });
+      panel.api.close();
+    } catch (e) {
+      logError(`プレビューを別ウィンドウにできません: ${errorText(e)}`);
+    }
+    return;
+  }
   if (id === 'viewport') {
     if (!isConnected()) return;
     try {
