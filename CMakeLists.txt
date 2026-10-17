@@ -27,7 +27,7 @@ foreach(_cfg Debug Release RelWithDebInfo MinSizeRel)
 endforeach()
 
 include(StudioOptions)        # studio_options (警告・定義の共通設定)
-include(StudioDependencies)   # SunsetGraphicsEngine / MathLib / ImGui / imnodes / nlohmann_json
+include(StudioDependencies)   # SunsetGraphicsEngine / MathLib / webview / nlohmann_json
 
 add_subdirectory(editor)
 

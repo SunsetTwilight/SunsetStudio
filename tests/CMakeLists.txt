@@ -1,9 +1,12 @@
 # ============================================================
 #  SunsetStudio の自動テスト (doctest + CTest)
 #
-#    studio_tests  両ライブラリの結合テスト
-#                  (エンジンの DLL の配置と初期化、MathLib、スキーマ)
-#                  環境変数 GFX_TEST_ADAPTER=software で WARP を使う (GPU のない CI 用)
+#    studio_tests       両ライブラリの結合テスト
+#                       (エンジンの DLL の配置と初期化、MathLib、スキーマ)
+#                       環境変数 GFX_TEST_ADAPTER=software で WARP を使う (GPU のない CI 用)
+#    studio_tests_unit  GPU も webview も使わない単体テスト (Bridge)
+#    editor_smoke       SunsetEditor --smoke-test --software: ウィンドウを開き、UI の ui.ready / app.info と
+#                       エンジンの初期化 (WARP) を確認して終了する (WebView2 ランタイムとデスクトップが必要)
 #
 #  実行: ctest --test-dir build/<preset> --output-on-failure
 # ============================================================
@@ -37,3 +40,17 @@ sunset_gfx_deploy_runtime(studio_tests)
 
 add_test(NAME integration COMMAND studio_tests)
 set_tests_properties(integration PROPERTIES LABELS "gpu")
+
+# ---- 単体テスト (GPU / webview 不要) ----
+add_executable(studio_tests_unit
+    doctest_main.cpp
+    test_bridge.cpp
+)
+target_link_libraries(studio_tests_unit PRIVATE studio_bridge studio_doctest studio_options)
+add_test(NAME unit COMMAND studio_tests_unit)
+
+# ---- エディターのスモークテスト ----
+if(TARGET studio_ui)
+    add_test(NAME editor_smoke COMMAND SunsetEditor --smoke-test --software)
+    set_tests_properties(editor_smoke PROPERTIES LABELS "gui" TIMEOUT 120)
+endif()

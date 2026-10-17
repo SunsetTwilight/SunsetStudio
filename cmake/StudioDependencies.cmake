@@ -11,9 +11,10 @@
 #    ローカルのフォルダを指定すると、ダウンロードせずにそれを使う (CMakePresets.json の *-dev)。
 #
 #  外部ライブラリ (エディター用):
-#    studio_imgui   Dear ImGui (docking ブランチ)   … UI
-#    studio_imnodes imnodes                        … レンダーグラフのノードエディター
-#    nlohmann_json  nlohmann/json                  … グラフ / パイプラインアセットの JSON
+#    webview        webview/webview (MIT)  … OS の WebView (Windows: WebView2) でエディターの UI を表示する
+#                   Windows では configure 時に NuGet から WebView2 SDK のヘッダーを取得する
+#    nlohmann_json  nlohmann/json (MIT)    … C++ と JS の間の JSON、アセットの JSON
+#  フロントエンド (React / Vite など) は editor/frontend/package.json で管理する。
 # ============================================================
 include(FetchContent)
 
@@ -24,7 +25,7 @@ include(FetchContent)
 # ※ ブランチを指定した場合、URL が変わらないので 2 回目以降は再ダウンロードされない。
 #    最新を取り込むには build/<preset>/_deps を削除するか --fresh で構成し直す。
 set(STUDIO_GITHUB_OWNER "SunsetTwilight" CACHE STRING "自作ライブラリの GitHub のオーナー")
-set(STUDIO_GFX_TAG      "v0.1.0"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
+set(STUDIO_GFX_TAG      "v0.2.0"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
 set(STUDIO_MATHLIB_TAG  "v0.1.0"         CACHE STRING "SunsetMathLib のタグ / ブランチ / コミット")
 set(STUDIO_GFX_URL      "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetGraphicsEngine/archive/${STUDIO_GFX_TAG}.tar.gz"
     CACHE STRING "SunsetGraphicsEngine の取得元 (アーカイブの URL)")
@@ -34,7 +35,7 @@ set(STUDIO_MATHLIB_URL  "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetMathLib
 FetchContent_Declare(SunsetGraphicsEngine
     URL              ${STUDIO_GFX_URL}
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    FIND_PACKAGE_ARGS 0.1
+    FIND_PACKAGE_ARGS 0.2
 )
 FetchContent_Declare(SunsetMathLib
     URL              ${STUDIO_MATHLIB_URL}
@@ -43,27 +44,16 @@ FetchContent_Declare(SunsetMathLib
 )
 
 # ---- 外部ライブラリ ----
-set(STUDIO_IMGUI_TAG    "v1.92.9-docking")
-set(STUDIO_IMNODES_TAG  "eb36902c892548ef94f88f51ad7e7c9c7058a71c")   # master (タグ v0.5 は古い ImGui 向け)
-set(STUDIO_JSON_VERSION "v3.12.0")
+set(STUDIO_WEBVIEW_VERSION "0.12.0")
+set(STUDIO_JSON_VERSION    "v3.12.0")
 
 # 外部ライブラリは git ではなく GitHub のアーカイブを URL で取得し、SHA256 で固定する。
 # (git clone は、所有者を記録しないドライブで "dubious ownership" として失敗することがあるため)
 # バージョンを変えるときは URL_HASH も更新すること。
-#
-# ImGui / imnodes は同梱の CMake を使わない (ImGui は持たず、imnodes のものは find_package(imgui) 前提)。
-# SOURCE_SUBDIR に存在しないディレクトリを指定して、ソースの取得だけを行い、ターゲットは下で自前で作る。
-FetchContent_Declare(imgui
-    URL      https://github.com/ocornut/imgui/archive/refs/tags/${STUDIO_IMGUI_TAG}.tar.gz
-    URL_HASH SHA256=61f2ec7ef19702e47689b77cc602e3aeeda423941bfbc5d8ecb6a02d05a9dd73
+FetchContent_Declare(webview
+    URL      https://github.com/webview/webview/archive/refs/tags/${STUDIO_WEBVIEW_VERSION}.tar.gz
+    URL_HASH SHA256=e2c8d0bed3fcd13e624074448b7d3b1d0b0d03546a15839f17ee0013f2cba1db
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    SOURCE_SUBDIR  _studio_no_cmake_
-)
-FetchContent_Declare(imnodes
-    URL      https://github.com/Nelarius/imnodes/archive/${STUDIO_IMNODES_TAG}.tar.gz
-    URL_HASH SHA256=39bb2a97c2e42b63da2140abe7c3038eb037a30194f50ef681ee2e57357b0a21
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    SOURCE_SUBDIR  _studio_no_cmake_
 )
 FetchContent_Declare(nlohmann_json
     URL      https://github.com/nlohmann/json/releases/download/${STUDIO_JSON_VERSION}/json.tar.xz
@@ -71,23 +61,23 @@ FetchContent_Declare(nlohmann_json
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
-FetchContent_MakeAvailable(SunsetGraphicsEngine SunsetMathLib imgui imnodes nlohmann_json)
+# webview は静的ライブラリ (webview::core_static) だけを使う。テスト / サンプル / ドキュメント / インストールは不要
+set(WEBVIEW_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(WEBVIEW_BUILD_STATIC_LIBRARY ON  CACHE BOOL "" FORCE)
+set(WEBVIEW_BUILD_TESTS          OFF CACHE BOOL "" FORCE)
+set(WEBVIEW_BUILD_EXAMPLES       OFF CACHE BOOL "" FORCE)
+set(WEBVIEW_BUILD_DOCS           OFF CACHE BOOL "" FORCE)
+set(WEBVIEW_INSTALL_DOCS         OFF CACHE BOOL "" FORCE)
+set(WEBVIEW_INSTALL_TARGETS      OFF CACHE BOOL "" FORCE)
+set(WEBVIEW_ENABLE_CHECKS        OFF CACHE BOOL "" FORCE)
+set(WEBVIEW_ENABLE_PACKAGING     OFF CACHE BOOL "" FORCE)
 
-# ---- Dear ImGui (コアのみ。描画はエンジンの ABI の上に実装するため、プラットフォーム / レンダラーのバックエンドは使わない) ----
-add_library(studio_imgui STATIC
-    ${imgui_SOURCE_DIR}/imgui.cpp
-    ${imgui_SOURCE_DIR}/imgui_draw.cpp
-    ${imgui_SOURCE_DIR}/imgui_tables.cpp
-    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    ${imgui_SOURCE_DIR}/imgui_demo.cpp
-)
-target_include_directories(studio_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}")
-target_compile_definitions(studio_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+FetchContent_MakeAvailable(SunsetGraphicsEngine SunsetMathLib webview nlohmann_json)
 
-# ---- imnodes ----
-add_library(studio_imnodes STATIC ${imnodes_SOURCE_DIR}/imnodes.cpp)
-target_include_directories(studio_imnodes SYSTEM PUBLIC "${imnodes_SOURCE_DIR}")
-target_link_libraries(studio_imnodes PUBLIC studio_imgui)
+# webview のソースは UTF-8 (日本語の Windows の既定のコードページでは C4819 の警告になる)
+if(MSVC AND TARGET webview_core_static)
+    target_compile_options(webview_core_static PRIVATE /utf-8)
+endif()
 
 # ---- どこから取得したかを表示する ----
 # install 済みのパッケージから来たターゲットは IMPORTED になる
@@ -105,4 +95,4 @@ foreach(_pair "SunsetGraphicsEngine|SunsetGraphicsEngine::core" "SunsetMathLib|M
         message(STATUS "[SunsetStudio] ${_dep}: FetchContent で取得")
     endif()
 endforeach()
-message(STATUS "[SunsetStudio] imgui ${STUDIO_IMGUI_TAG} / imnodes ${STUDIO_IMNODES_TAG} / nlohmann_json ${STUDIO_JSON_VERSION}")
+message(STATUS "[SunsetStudio] webview ${STUDIO_WEBVIEW_VERSION} / nlohmann_json ${STUDIO_JSON_VERSION}")

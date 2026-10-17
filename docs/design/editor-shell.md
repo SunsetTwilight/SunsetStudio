@@ -186,7 +186,7 @@ tests/
 | dockview | ドッキングできるパネルのレイアウト | MIT | 同上 |
 | @xyflow/react (React Flow) | レンダーグラフのノードエディター (M4) | MIT | 同上 (M4 で追加) |
 
-- ImGui と imnodes は不要になるので、M2a で取り除く。
+- ImGui と imnodes は M2a で取り除いた。
 - 実行時には、Windows では WebView2 ランタイムが必要 (Windows 11 には標準で入っている)。macOS は標準の WKWebView、Linux は WebKitGTK のパッケージが必要。
 
 ### ビルドとの統合
@@ -207,7 +207,23 @@ tests/
 | **M2d** 統計 | `stats` イベントで、フレーム時間とパスごとの GPU 時間を表示する | 値が 250ms ごとに更新される |
 
 - M2a と M2b は、M1 (Phase 2c) と並行して進められる。
-- M2c は、M1 の「記述子の JSON の往復」に依存する。
+- M2c は、M1 の「記述子の JSON の往復」に依存する (M1 はエンジン v0.2.0 で完了)。
+
+### M2a の実装状況 (完了)
+
+| 項目 | 内容 |
+|------|------|
+| 依存 | エンジンを v0.2.0 (ABI 7) に上げた。webview 0.12.0 を静的ライブラリで追加。ImGui / imnodes を削除。プリセットの `GFX_DXC_DIR` を外した (DXC はエンジンが取得する) |
+| ウィンドウ / UI | `WebHost`。配布時は `bin/ui/index.html` (1 ファイル、約 230 KB) を `webview_set_html` で読み込む。`STUDIO_UI_DEV_URL` が localhost の URL なら開発サーバーを開く。読み込めなければ案内のページを表示する |
+| Bridge | `studio_bridge` (webview に依存しない静的ライブラリ)。`window.__studio_call(method, params)` → `Bridge::handleCall`。返答は UI スレッドに転送してから `webview_return`。エラーコードは JSON-RPC と同じ値。返答しないまま破棄された呼び出しは内部エラーとして返す |
+| イベント | `WebHost::emit`。フロントエンドが `ui.ready` を呼ぶまで C++ 側でためる。ページ側も初期化スクリプト (`webview_init`) でためておき、`installEventSink` で受け取り口を差し替える |
+| 描画スレッド | `RenderThread`。エンジンの初期化 / 終了と、頼まれた処理の実行だけ (フレームのループは M2b)。エンジンのデバッグメッセージは `log` イベントになる (id から source を shader / pipeline / engine / d3d12 に分ける) |
+| メソッド / イベント | `ui.ready`、`app.info`、`app.ping` / `log`、`engine.status` (型は `frontend/src/bridge/protocol.ts`) |
+| フロントエンド | React 19 + TypeScript 7 + Vite 8 + vite-plugin-singlefile。ログのパネル (重大度の絞り込み、検索、追従スクロール)、ステータスバー (エンジンの状態)。ビューポートとインスペクターは場所だけ |
+| ビルド | `cmake/StudioFrontend.cmake`: `package-lock.json` が変わったら `npm ci`、ソースが変わったら `npm run build`。Node.js がなければ configure をエラーにする (`STUDIO_BUILD_UI=OFF` で回避) |
+| テスト | Bridge の単体テスト (`unit`)、`SunsetEditor --smoke-test --software` (`editor_smoke`、ラベル `gui`)。CI はスモークテストを `continue-on-error` で実行する |
+
+M2b に持ち越し: dockview によるドッキング (今は CSS Grid の固定レイアウト)、Release ビルドのコンソールを出さない設定。
 
 ---
 

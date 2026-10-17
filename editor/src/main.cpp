@@ -1,56 +1,45 @@
 // ============================================================
-//  editor/src/main.cpp  (Phase 4 までのスタブ)
+//  editor/src/main.cpp
 //
-//  依存ライブラリが正しく取得・リンク・配置されていることを確認するだけの実行ファイル。
-//    ・SunsetGraphicsEngine: 本体 DLL を初期化し、バックエンド DLL をロードしてアダプター名を表示
-//    ・SunsetMathLib       : ベクトル演算
-//    ・ImGui / imnodes / nlohmann_json: コンテキストの作成と JSON の出力
-//  エディター本体は SunsetGraphicsEngine/docs/design/editor-architecture.md の Phase 4 で実装する。
+//  SunsetEditor の起動。設計は docs/design/editor-shell.md。
+//    UI スレッド (このスレッド): webview のウィンドウ、C++ と JS の橋渡し
+//    描画スレッド             : エンジン
+//
+//  コマンドライン / 環境変数:
+//    --software / STUDIO_ADAPTER=software   WARP (ソフトウェアレンダラー) を使う
+//    --devtools / STUDIO_DEVTOOLS=1          開発者ツールを使えるようにする (Debug ビルドでは常に)
+//    STUDIO_UI_DEV_URL=http://localhost:5173 Vite の開発サーバーの UI を開く (ホットリロード)
+//    --smoke-test                            UI とエンジンが動いたことを確認して終了する (自動テスト用)
 // ============================================================
-#include "gfx/core/GraphicsEngine.h"
-#include "gfx/schema/GfxSchema.h"
-#include "MathLib/Math.h"
+#include "app/EditorApp.h"
 
-#include <imgui.h>
-#include <imnodes.h>
-#include <nlohmann/json.hpp>
+#include <filesystem>
 
-#include <iostream>
-
-int main()
-{
-	// ---- SunsetGraphicsEngine ----
-	GraphicsEngine engine;
-	DeviceConfig   cfg;
-	cfg.appName = "SunsetEditor";
-#ifdef STUDIO_GFX_VALIDATION
-	cfg.validation = true;
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
-	if (!engine.init(cfg))
-	{
-		std::cerr << "[SunsetEditor] engine.init failed: " << engine.lastError() << "\n";
-		return 1;
-	}
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 
-	// ---- SunsetMathLib ----
-	const Vector3 camera{ 1.5f, 2.0f, -2.5f };
-	const float   distance = length(camera);
+namespace
+{
+std::filesystem::path executableDir()
+{
+	wchar_t buf[MAX_PATH * 2] = {};
+	const DWORD n = GetModuleFileNameW(nullptr, buf, static_cast<DWORD>(std::size(buf)));
+	if (n == 0 || n >= std::size(buf))
+		return std::filesystem::current_path();
+	return std::filesystem::path(buf).parent_path();
+}
+} // namespace
 
-	// ---- ImGui / imnodes ----
-	ImGui::CreateContext();
-	ImNodes::CreateContext();
+int main(int argc, char** argv)
+{
+	studio::EditorOptions options = studio::EditorOptions::fromEnvironment(argc, argv);
+	options.uiIndex = executableDir() / "ui" / "index.html";
 
-	nlohmann::json info = {
-		{ "adapter",        engine.adapterName() },
-		{ "gfxAbi",         GFX_ABI_VERSION },
-		{ "cameraDistance", distance },
-		{ "imgui",          IMGUI_VERSION },
-		{ "json",           { NLOHMANN_JSON_VERSION_MAJOR, NLOHMANN_JSON_VERSION_MINOR, NLOHMANN_JSON_VERSION_PATCH } },
-	};
-	std::cout << "[SunsetEditor] stub: " << info.dump() << "\n";
-
-	ImNodes::DestroyContext();
-	ImGui::DestroyContext();
-	engine.shutdown();
-	return 0;
+	studio::EditorApp app(std::move(options));
+	return app.run();
 }
