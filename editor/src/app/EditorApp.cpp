@@ -2,6 +2,7 @@
 //  editor/src/app/EditorApp.cpp
 // ============================================================
 #include "EditorApp.h"
+#include "services/SchemaJson.h"
 
 #include <algorithm>
 #include <cmath>
@@ -223,6 +224,78 @@ void EditorApp::registerMethods()
 		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_startTime).count();
 		r.ok({ { "echo", p }, { "uptimeMs", ms } });
 	});
+
+	// ---- スキーマ (インスペクターのフォームを作るための型の説明) ----
+	b.registerMethod("schema.types", [](const Json&, Bridge::Reply r) {
+		r.ok(listTypes());
+	});
+	b.registerMethod("schema.describe", [](const Json& p, Bridge::Reply r) {
+		const std::string type = p.at("type").get<std::string>();
+		Json d = describeType(type);
+		if (d.is_null())
+			r.error(BridgeError::InvalidParams, "型 '" + type + "' はスキーマにありません");
+		else
+			r.ok(std::move(d));
+	});
+
+	// ---- パイプライン (描画スレッドが持つので、描画スレッドで処理して返答する) ----
+	b.registerMethod("pipeline.list", [this](const Json&, Bridge::Reply r) {
+		m_render.postScene([r](GraphicsEngine&, SceneRenderer* scene) {
+			if (!scene)
+				return r.error(BridgeError::Unavailable, "ビューポートのシーンがありません (エンジンの初期化に失敗した可能性があります)");
+			Json list = Json::array();
+			for (const auto& p : scene->pipelines())
+				list.push_back({ { "id", p.id }, { "label", p.label }, { "type", "GfxGraphicsPipelineDesc" } });
+			r.ok(list);
+		});
+	});
+
+	b.registerMethod("pipeline.get", [this](const Json& p, Bridge::Reply r) {
+		const std::string id = p.at("id").get<std::string>();
+		m_render.postScene([r, id](GraphicsEngine& engine, SceneRenderer* scene) {
+			const auto* entry = scene ? scene->findPipeline(id) : nullptr;
+			GfxGraphicsPipelineDesc desc;
+			if (!entry || !engine.getPipelineDesc(entry->handle, desc))
+				return r.error(BridgeError::InvalidParams, "パイプライン '" + id + "' はありません");
+			r.ok({ { "id", id }, { "type", "GfxGraphicsPipelineDesc" },
+			       { "desc", structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &desc) } });
+		});
+	});
+
+	// desc は変えるフィールドだけでもよい (書かれていないフィールドは今の値のまま)。
+	// 値が不正ならエラー (フィールドのパス付き)、PSO を作れなければエラー (理由はログ) で、どちらも元のまま
+	b.registerMethod("pipeline.update", [this](const Json& p, Bridge::Reply r) {
+		const std::string id   = p.at("id").get<std::string>();
+		const Json        json = p.at("desc");
+		m_render.postScene([this, r, id, json](GraphicsEngine& engine, SceneRenderer* scene) {
+			const auto* entry = scene ? scene->findPipeline(id) : nullptr;
+			GfxGraphicsPipelineDesc desc;
+			if (!entry || !engine.getPipelineDesc(entry->handle, desc))
+				return r.error(BridgeError::InvalidParams, "パイプライン '" + id + "' はありません");
+
+			const ApplyResult applied = applyJson(json, desc);
+			for (const auto& w : applied.warnings)
+				log("warning", "inspector", id + ": " + w);
+			if (!applied.ok)
+			{
+				std::string message = "値が不正です";
+				for (const auto& e : applied.errors)
+				{
+					message += "\n" + e;
+					log("error", "inspector", id + ": " + e);
+				}
+				return r.error(BridgeError::InvalidParams, message);
+			}
+			desc.debugName = nullptr;   // 名前は今のまま
+			if (!engine.updatePipeline(entry->handle, desc))
+				return r.error(BridgeError::Internal, "パイプラインを作り直せませんでした (理由はログを確認してください)。元の設定のままです");
+
+			GfxGraphicsPipelineDesc current;
+			engine.getPipelineDesc(entry->handle, current);
+			r.ok({ { "id", id }, { "desc", structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &current) },
+			       { "warnings", applied.warnings } });
+		});
+	});
 }
 
 Json EditorApp::engineJson()
@@ -300,23 +373,76 @@ void EditorApp::log(const char* level, const char* source, const std::string& te
 
 void EditorApp::checkSmokeTest()
 {
-	if (!m_options.smokeTest || m_smokeFinished || !m_uiReady || !m_infoRequested || !m_engineDone)
+	if (!m_options.smokeTest || m_smokeStage == SmokeStage::Finished || !m_uiReady || !m_infoRequested || !m_engineDone)
 		return;
-	// エンジンが動いたなら、ビューポートが描けるまで待つ
-	if (m_engineOk && m_framesDrawn < m_options.smokeFrames)
-		return;
-	m_smokeFinished = true;
-	const uint32_t problems = m_d3dProblems.load();
+
+	auto finish = [this](int code, const std::string& what) {
+		m_smokeStage = SmokeStage::Finished;
+		const uint32_t problems = m_d3dProblems.load();
+		if (code == 0 && problems > 0)
+			code = 5;
+		m_exitCode = code;
+		std::cerr << "[SunsetEditor] smoke test: " << (code == 0 ? "OK" : what.empty() ? "D3D12 のエラー / 警告がある" : what)
+		          << " (frames=" << m_framesDrawn << ", d3d12=" << problems << ")\n";
+		// すでに UI スレッドのキューに積んだイベントを送ってから閉じる
+		m_host.post([this] { m_host.terminate(); });
+	};
+
 	if (!m_engineOk)
-		m_exitCode = 4;
-	else if (problems > 0)
-		m_exitCode = 5;
-	else
-		m_exitCode = 0;
-	std::cerr << "[SunsetEditor] smoke test: "
-	          << (m_exitCode == 0 ? "OK" : m_exitCode == 4 ? "エンジンの初期化に失敗" : "D3D12 のエラー / 警告がある")
-	          << " (frames=" << m_framesDrawn << ", d3d12=" << problems << ")\n";
-	// すでに UI スレッドのキューに積んだイベントを送ってから閉じる
-	m_host.post([this] { m_host.terminate(); });
+		return finish(4, "エンジンの初期化に失敗");
+
+	switch (m_smokeStage)
+	{
+	case SmokeStage::WaitFrames:
+		// ビューポートが描けるまで待つ
+		if (m_framesDrawn < m_options.smokeFrames)
+			return;
+		m_smokeStage = SmokeStage::Inspector;
+		runInspectorSelfCheck([this, finish](bool ok, const std::string& error) {
+			// 返答は描画スレッドから届くので、UI スレッドで続ける
+			m_host.post([this, finish, ok, error] {
+				if (!ok)
+					return finish(6, "インスペクターの経路の確認に失敗: " + error);
+				m_smokeStage    = SmokeStage::WaitAfter;
+				m_smokeFrameMark = m_framesDrawn;
+				checkSmokeTest();
+			});
+		});
+		return;
+	case SmokeStage::WaitAfter:
+		// パイプラインを作り直したあとも描けていること
+		if (m_framesDrawn < m_smokeFrameMark + 20)
+			return;
+		return finish(0, "");
+	default:
+		return;
+	}
+}
+
+// pipeline.get / pipeline.update を、フロントエンドと同じ経路 (Bridge のメソッド) で呼ぶ
+//   1. 正しい変更 (カリングなし + ワイヤーフレーム) が反映される
+//   2. 不正な値はエラーになる
+//   3. 元に戻す
+void EditorApp::runInspectorSelfCheck(std::function<void(bool ok, const std::string& error)> done)
+{
+	Bridge& b = m_host.bridge();
+	const Json change  = { { "rasterizerState", { { "cullMode", "None" }, { "fillMode", "Wireframe" } } } };
+	const Json invalid = { { "rasterizerState", { { "cullMode", "Sideways" } } } };
+	const Json restore = { { "rasterizerState", { { "cullMode", "Back" }, { "fillMode", "Solid" } } } };
+
+	b.callLocal("pipeline.update", { { "id", "scene" }, { "desc", change } }, [this, done, invalid, restore](int status, const Json& r) {
+		if (status != 0 || r["desc"]["rasterizerState"]["fillMode"] != "Wireframe")
+			return done(false, "変更が反映されない: " + r.dump());
+		log("info", "smoke", "pipeline.update: ワイヤーフレームに変更");
+		m_host.bridge().callLocal("pipeline.update", { { "id", "scene" }, { "desc", invalid } }, [this, done, restore](int status2, const Json& r2) {
+			if (status2 == 0 || r2.value("code", 0) != static_cast<int>(BridgeError::InvalidParams))
+				return done(false, "不正な値がエラーにならない: " + r2.dump());
+			m_host.bridge().callLocal("pipeline.update", { { "id", "scene" }, { "desc", restore } }, [done](int status3, const Json& r3) {
+				if (status3 != 0 || r3["desc"]["rasterizerState"]["cullMode"] != "Back")
+					return done(false, "元に戻せない: " + r3.dump());
+				done(true, {});
+			});
+		});
+	});
 }
 } // namespace studio

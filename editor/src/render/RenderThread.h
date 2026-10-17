@@ -78,6 +78,13 @@ public:
 	// 描画スレッドで task を実行する (順番どおり)。エンジンの初期化に失敗していても呼ばれる
 	// (task の中で engine.isInitialized() を確認すること)。stop 後は何もしない
 	void post(Task task);
+	// 描画スレッドでシーンを使う処理を実行する。シーンを作れていなければ scene は nullptr
+	using SceneTask = std::function<void(GraphicsEngine&, SceneRenderer* scene)>;
+	void postScene(SceneTask task)
+	{
+		post([this, task = std::move(task)](GraphicsEngine& engine) { task(engine, m_sceneOk ? &m_scene : nullptr); });
+	}
+
 	// 待っている描画スレッドを起こす (ビューポートが見えるようになったときなど)
 	void wake() { m_cv.notify_one(); }
 

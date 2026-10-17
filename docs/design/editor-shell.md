@@ -103,8 +103,8 @@ bridge.registerMethod("app.info", [&](const json& params, Reply reply) {
 | `app.info` | バージョン、アダプター名、ABI、プロトコルのバージョン | — |
 | `viewport.setRect` | ビューポートの矩形 (CSS px) と `devicePixelRatio` | — |
 | `viewport.setVisible` | 表示 / 非表示 | — |
-| `schema.types` / `schema.describe` | 記述子の型の一覧と、フィールド表 (名前、型、列挙子、範囲、説明) | エンジンのスキーマ |
-| `pipeline.list` / `pipeline.get` / `pipeline.update` | パイプラインの記述子の取得と変更 (変更は PSO を作り直す) | M1 の「記述子の JSON の往復」 |
+| `schema.types` / `schema.describe` | 記述子の型の一覧と、フィールド表 (名前、型、列挙子、範囲、説明) | エンジンのスキーマ (M2c で実装) |
+| `pipeline.list` / `pipeline.get` / `pipeline.update` | パイプラインの記述子の取得と変更 (変更は PSO を作り直す) | M1 の「記述子の JSON の往復」 (M2c で実装) |
 
 ---
 
@@ -241,6 +241,19 @@ M2b に持ち越し: dockview によるドッキング (今は CSS Grid の固�
 | テスト | スモークテストは、ビューポートが 30 フレーム描けて、D3D12 のエラー / 警告が 0 件であることまで確認する (終了コード 5 = D3D12 のメッセージあり)。手元では、開いてすぐ×で閉じる操作をタイミングを変えて 8 回、ドラッグ / ホイール / リサイズ / 最小化と復帰を確認した |
 
 M2c 以降に持ち越し: ビューポートにフォーカスがあるときのショートカットキーの JS への転送、レイアウトの保存、Release ビルドのコンソールを出さない設定。
+
+### M2c の実装状況 (完了)
+
+| 項目 | 内容 |
+|------|------|
+| メソッド | `schema.types` (型の一覧)、`schema.describe {type}` (型と、その中で使う構造体 / 列挙型の説明をまとめて返す)、`pipeline.list` / `pipeline.get {id}` / `pipeline.update {id, desc}` |
+| JSON の橋渡し | `studio_services` (`services/SchemaJson.*`)。エンジンの `GfxJson.h` と Bridge の `nlohmann::json` を文字列で変換する。`pipeline.get` は既定値も含めた全フィールドを返す (ハンドルと `const char*` は出さない)。`pipeline.update` は今の記述子に、書かれたフィールドだけを上書きする (ハンドルはそのまま)。GPU を使わずに単体テストする |
+| 作り直し | パイプラインは描画スレッドが持つので、`RenderThread::postScene` で描画スレッドに頼み、`engine.updatePipeline` で PSO を作り直してから返答する。値が不正なら `InvalidParams` (フィールドのパス付き)、PSO を作れなければ `Internal` で、どちらもエンジン側は元のまま。理由はログのパネルにも出る |
+| フォーム | `inspector/SchemaForm.tsx`: フィールド表からフォームを作る (bool / enum / flags / 数値 / 文字列 / 構造体 / 固定長配列)。数値は Enter かフォーカスを外したときに確定する。既定値と違うフィールドは名前を強調し、tooltip に対応する D3D12 のメンバーを出す。絞り込みの欄に入力すると、一致するフィールドをパス付きで並べる |
+| インスペクター | `panels/InspectorPanel.tsx`: パイプラインの選択、変更ごとに `pipeline.update` (送信中の変更は最後の値だけを送る)、結果 (反映 / 警告 / エラー) の表示、「元に戻す」(エンジンの今の値を読み直す) |
+| 対象 | ビューポートの 2 つのパイプライン (立方体、グリッド)。レンダーグラフ (M3) ができたら、グラフのパスのパイプラインに広げる |
+| テスト | `studio_tests_unit` に `test_schema_json.cpp` (型の説明、往復、部分的な上書き、不正な値、推奨範囲の警告)。スモークテストは、ビューポートの描画のあと、`pipeline.update` を Bridge の同じ経路 (`Bridge::callLocal`) で呼び、正しい変更が反映されること、不正な値がエラーになること、元に戻したあとも描けて D3D12 のメッセージが 0 件であることを確認する (終了コード 6 = インスペクターの経路の失敗)。手元では、実際のマウスとキー入力で fillMode を Wireframe にしてビューポートに反映されることを確認した |
+| CI | スモークテストを必須にした (M2a / M2b で GitHub のランナーでも安定して通ったため)。actions を v5 に上げた |
 
 ---
 

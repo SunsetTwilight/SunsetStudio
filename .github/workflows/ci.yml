@@ -5,7 +5,7 @@
 #  設定どおり GitHub のアーカイブから取得する (STUDIO_GFX_TAG / STUDIO_MATHLIB_TAG)。
 #  エディターのフロントエンドは Node.js (editor/frontend/.nvmrc) でビルドする (STUDIO_BUILD_UI)。
 #  GitHub のランナーには GPU がないため、テストは WARP で実行する (GFX_TEST_ADAPTER=software)。
-#  エディターのスモークテスト (ウィンドウを開く) はランナーの環境に左右されるので、失敗しても CI を止めない。
+#  エディターのスモークテスト (ウィンドウを開き、ビューポートの描画とインスペクターの経路を確認する) も必須。
 # ============================================================
 name: CI
 
@@ -28,9 +28,9 @@ jobs:
         config: [ Debug, Release ]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: editor/frontend/.nvmrc
           cache: npm
@@ -51,5 +51,4 @@ jobs:
         run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure -LE gui
 
       - name: Editor smoke test (GUI)
-        continue-on-error: true
         run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure -L gui

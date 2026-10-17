@@ -5,7 +5,8 @@
 //  エディター全体の寿命。UI スレッド (main) で WebHost とビューポートのウィンドウを動かし、
 //  描画スレッドでエンジンを動かす。JS から呼べるメソッド (Bridge) と、JS に送るイベントをここで登録する。
 //
-//  メソッド:  ui.ready / app.info / app.ping / viewport.setRect
+//  メソッド:  ui.ready / app.info / app.ping / viewport.setRect /
+//             schema.types / schema.describe / pipeline.list / pipeline.get / pipeline.update
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) / stats (フレーム時間)
 // ============================================================
 
@@ -58,6 +59,7 @@ private:
 	void log(const char* level, const char* source, const std::string& text, int32_t id = 0);
 
 	void checkSmokeTest();   // UI スレッドから呼ぶ
+	void runInspectorSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 
 	EditorOptions  m_options;
 	WebHost        m_host;       // 破棄の順: 描画スレッド → ビューポート → WebView
@@ -77,7 +79,9 @@ private:
 	bool     m_engineDone    = false;
 	bool     m_engineOk      = false;
 	uint64_t m_framesDrawn   = 0;
-	bool     m_smokeFinished = false;
+	enum class SmokeStage { WaitFrames, Inspector, WaitAfter, Finished };
+	SmokeStage m_smokeStage    = SmokeStage::WaitFrames;
+	uint64_t   m_smokeFrameMark = 0;
 	int      m_exitCode      = 0;
 };
 } // namespace studio

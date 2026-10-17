@@ -4,7 +4,7 @@
 
 どちらのライブラリも単独で使えるように作られています。このリポジトリはそれらを使う側で、ライブラリのコードは含みません。
 
-> **現在の状態**: M2b(3D ビューポート)。`SunsetEditor` は webview のウィンドウに Web UI(React、ドッキングできるパネル)を表示し、ビューポートのパネルにエンジンの描画(ネイティブの子ウィンドウ)を重ねます。エンジンのメッセージはログのパネルに、フレームの統計はステータスバーに出ます。インスペクターは M2c で入ります。
+> **現在の状態**: M2c(インスペクター)。`SunsetEditor` は webview のウィンドウに Web UI(React、ドッキングできるパネル)を表示し、ビューポートのパネルにエンジンの描画(ネイティブの子ウィンドウ)を重ねます。インスペクターでは、ビューポートのパイプラインの記述子を D3D12 の構造体のメンバー単位で編集でき、変更はすぐ PSO の作り直しとして反映されます。エンジンのメッセージはログのパネルに、フレームの統計はステータスバーに出ます。
 > 設計: [docs/design/editor-shell.md](docs/design/editor-shell.md)(エディターの骨格)、SunsetGraphicsEngine の [docs/design/editor-architecture.md](../SunsetGraphicsEngine/docs/design/editor-architecture.md)(全体)
 
 ---
@@ -25,6 +25,7 @@ SunsetStudio/
 │   │   ├── app/EditorApp.*      ← 全体の寿命、JS から呼べるメソッドとイベント
 │   │   ├── host/WebHost.*       ← webview の包み (UI スレッド)
 │   │   ├── host/Bridge.*        ← JS → C++ の RPC (webview に依存しない)
+│   │   ├── services/SchemaJson.* ← スキーマと JSON の橋渡し (インスペクター用)
 │   │   ├── render/RenderThread.* ← エンジンを持つ描画スレッド (ビューポートのフレームのループ)
 │   │   ├── render/SceneRenderer.* ← ビューポートのシーン
 │   │   └── viewport/ViewportWindow* ← ビューポートの子ウィンドウとマウスの入力
@@ -137,6 +138,9 @@ build\windows-dev-debug\bin\SunsetEditor.exe
 
 ビューポートの操作: 左ドラッグで回転、中 / 右ドラッグで平行移動、ホイールでズーム、F キーで視点を戻す。
 `editor/shaders/*.hlsl` を保存すると、実行中のビューポートにその場で反映されます (ビルドツリーの exe はソースのフォルダを読みます)。
+インスペクターでは、パイプライン (立方体 / グリッド) を選び、ブレンド、ラスタライザー、深度ステンシル、入力レイアウトなどの値を変えると、すぐビューポートに反映されます。
+既定値と違うフィールドは名前が強調され、不正な値や PSO を作れない組み合わせはエラーとして表示されます (エンジン側は元のまま)。
+
 パネルはタブをドラッグして移動 / 分割できます。ビューポートの上には Web の UI を重ねられないため、ドラッグ中はビューポートを隠します。
 
 C++ と JS の間のメソッドとイベントの型は `editor/frontend/src/bridge/protocol.ts`、C++ 側の登録は `editor/src/app/EditorApp.cpp` にあります。
@@ -148,14 +152,14 @@ C++ と JS の間のメソッドとイベントの型は `editor/frontend/src/br
 | テスト | 内容 | 必要なもの |
 |-------|------|-----------|
 | `integration` | エンジンの DLL の配置と初期化、MathLib、スキーマ | GPU または WARP |
-| `unit` | Bridge (RPC) の単体テスト | なし |
-| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートが 30 フレーム描けて D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
+| `unit` | Bridge (RPC) と、スキーマと JSON の橋渡しの単体テスト | なし |
+| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートの描画、インスペクターの経路 (`pipeline.update`) を確認し、D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
 
 ```bat
 ctest --test-dir build\windows-dev-debug --output-on-failure
 ```
 
-GPU のない環境では `set GFX_TEST_ADAPTER=software` で WARP を使います。GitHub Actions (`.github/workflows/ci.yml`) では、GitHub から取得したライブラリで Debug / Release のビルドとテストを WARP で実行します。スモークテストはランナーの環境に左右されるので、失敗しても CI を止めません。
+GPU のない環境では `set GFX_TEST_ADAPTER=software` で WARP を使います。GitHub Actions (`.github/workflows/ci.yml`) では、GitHub から取得したライブラリで Debug / Release のビルドとテストを WARP で実行します。スモークテストも必須です (GitHub の windows-2022 のランナーでも WebView2 のウィンドウを開けます)。
 
 ---
 

@@ -51,8 +51,71 @@ export interface ViewportRect {
   visible: boolean;
 }
 
+// ---- スキーマ (gfxDescribeStruct / gfxDescribeEnum の JSON) ----
+export type FieldType =
+  | 'bool'
+  | 'uint8'
+  | 'int32'
+  | 'uint32'
+  | 'float'
+  | 'enum'
+  | 'flags'
+  | 'struct'
+  | 'string'
+  | 'handle'
+  | 'cstring'
+  | 'pointer';
+
+export interface FieldDesc {
+  name: string;
+  type: FieldType;
+  enum?: string;
+  struct?: string;
+  count: number; // 1 = スカラー。string のときは最大のバイト数 (終端を含む)
+  min?: number;
+  max?: number;
+  serialized: boolean; // false = ハンドルなど (JSON に出ない。表示だけ)
+  default?: unknown;
+  tooltip?: string; // 対応する D3D12 のメンバー
+}
+
+export interface StructDesc {
+  name: string;
+  size: number;
+  fields: FieldDesc[];
+}
+
+export interface EnumDesc {
+  name: string;
+  flags: boolean;
+  values: { name: string; value: number }[];
+}
+
+export interface TypeDescription {
+  type: string;
+  structs: Record<string, StructDesc>;
+  enums: Record<string, EnumDesc>;
+}
+
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+export type JsonObject = { [key: string]: JsonValue };
+
+export interface PipelineInfo {
+  id: string;
+  label: string;
+  type: string;
+}
+
 // JS → C++ (studio.call)
 export interface Methods {
+  'schema.types': { params: Record<string, never>; result: { structs: string[]; enums: string[] } };
+  'schema.describe': { params: { type: string }; result: TypeDescription };
+  'pipeline.list': { params: Record<string, never>; result: PipelineInfo[] };
+  'pipeline.get': { params: { id: string }; result: { id: string; type: string; desc: JsonObject } };
+  'pipeline.update': {
+    params: { id: string; desc: JsonObject };
+    result: { id: string; desc: JsonObject; warnings: string[] };
+  };
   'ui.ready': { params: Record<string, never>; result: { protocol: number } };
   'app.info': { params: Record<string, never>; result: AppInfo };
   'app.ping': { params: unknown; result: { echo: unknown; uptimeMs: number } };

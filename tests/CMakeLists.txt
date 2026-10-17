@@ -4,7 +4,7 @@
 #    studio_tests       両ライブラリの結合テスト
 #                       (エンジンの DLL の配置と初期化、MathLib、スキーマ)
 #                       環境変数 GFX_TEST_ADAPTER=software で WARP を使う (GPU のない CI 用)
-#    studio_tests_unit  GPU も webview も使わない単体テスト (Bridge)
+#    studio_tests_unit  GPU も webview も使わない単体テスト (Bridge、スキーマと JSON の橋渡し)
 #    editor_smoke       SunsetEditor --smoke-test --software: ウィンドウを開き、UI の ui.ready / app.info と
 #                       エンジンの初期化 (WARP) を確認して終了する (WebView2 ランタイムとデスクトップが必要)
 #
@@ -45,8 +45,9 @@ set_tests_properties(integration PROPERTIES LABELS "gpu")
 add_executable(studio_tests_unit
     doctest_main.cpp
     test_bridge.cpp
+    test_schema_json.cpp
 )
-target_link_libraries(studio_tests_unit PRIVATE studio_bridge studio_doctest studio_options)
+target_link_libraries(studio_tests_unit PRIVATE studio_bridge studio_services studio_doctest studio_options)
 add_test(NAME unit COMMAND studio_tests_unit)
 
 # ---- エディターのスモークテスト ----

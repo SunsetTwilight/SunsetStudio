@@ -122,6 +122,22 @@ TEST_CASE("Bridge: 返答しないまま破棄されたら内部エラーを返�
 	CHECK(f.sent[0].value["code"] == static_cast<int>(BridgeError::Internal));
 }
 
+TEST_CASE("Bridge: C++ の中から同じメソッドを呼べる (callLocal)")
+{
+	Fixture f;
+	f.bridge.registerMethod("double", [](const Json& p, Bridge::Reply r) { r.ok({ { "v", p.at("v").get<int>() * 2 } }); });
+	int  status = -1;
+	Json result;
+	f.bridge.callLocal("double", { { "v", 21 } }, [&](int s, const Json& j) { status = s; result = j; });
+	CHECK(status == 0);
+	CHECK(result["v"] == 42);
+	CHECK(f.sent.empty());   // webview への送信関数は使わない
+
+	f.bridge.callLocal("missing", Json::object(), [&](int s, const Json& j) { status = s; result = j; });
+	CHECK(status != 0);
+	CHECK(result["code"] == static_cast<int>(BridgeError::MethodNotFound));
+}
+
 TEST_CASE("Bridge: 登録の置き換えと一覧")
 {
 	Fixture f;

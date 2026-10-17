@@ -105,6 +105,10 @@ bool SceneRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, std::st
 		error = "ビューポートのパイプラインを作れませんでした (詳細はログ)";
 		return false;
 	}
+	m_pipelineList = {
+		{ "scene", "立方体 (ViewportScene)", m_scenePipe },
+		{ "grid",  "グリッド (ViewportGrid)", m_gridPipe },
+	};
 
 	// ---- メッシュと定数バッファ ----
 	std::vector<Vertex>   vertices;
@@ -157,6 +161,7 @@ void SceneRenderer::shutdown(GraphicsEngine& engine)
 	m_layout = {};
 	m_vb = m_ib = m_frameCB = {};
 	m_objects.clear();
+	m_pipelineList.clear();
 }
 
 void SceneRenderer::ensureDepth(GraphicsEngine& engine, uint32_t width, uint32_t height)

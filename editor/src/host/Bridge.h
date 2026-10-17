@@ -73,7 +73,13 @@ public:
 	// webview のバインドから呼ぶ。argsJson は JS の引数の配列 ('["method", params]')
 	void handleCall(const std::string& id, const std::string& argsJson);
 
+	// C++ の中から同じメソッドを呼ぶ (自動テストなど)。返答は done に届く (返答したスレッドから呼ばれる)
+	using LocalDone = std::function<void(int status, const Json& result)>;
+	void callLocal(const std::string& method, const Json& params, LocalDone done);
+
 private:
+	void dispatch(const std::string& id, const std::string& argsJson, const Sender& sender);
+
 	Sender                         m_sender;
 	mutable std::mutex             m_mutex;
 	std::map<std::string, Handler> m_handlers;

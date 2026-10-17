@@ -29,6 +29,22 @@ public:
 	// rt (バックバッファ) に描いて submit する。深度バッファは rt の大きさに合わせて作り直す
 	void render(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height, const OrbitCamera& camera);
 
+	// インスペクターで編集できるパイプライン
+	struct PipelineEntry
+	{
+		std::string    id;      // "scene" / "grid"
+		std::string    label;   // 表示名
+		PipelineHandle handle;
+	};
+	const std::vector<PipelineEntry>& pipelines() const { return m_pipelineList; }
+	const PipelineEntry* findPipeline(const std::string& id) const
+	{
+		for (const auto& p : m_pipelineList)
+			if (p.id == id)
+				return &p;
+		return nullptr;
+	}
+
 private:
 	struct ObjectConstants
 	{
@@ -46,5 +62,6 @@ private:
 	IDepthStencil*      m_depth = nullptr;
 	uint32_t            m_depthW = 0, m_depthH = 0;
 	std::vector<ObjectConstants> m_objects;
+	std::vector<PipelineEntry>   m_pipelineList;
 };
 } // namespace studio

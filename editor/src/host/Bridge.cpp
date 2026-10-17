@@ -76,8 +76,22 @@ std::vector<std::string> Bridge::methods() const
 
 void Bridge::handleCall(const std::string& id, const std::string& argsJson)
 {
+	dispatch(id, argsJson, m_sender);
+}
+
+void Bridge::callLocal(const std::string& method, const Json& params, LocalDone done)
+{
+	const Json args = Json::array({ method, params });
+	dispatch("local", args.dump(), [done](const std::string&, int status, const std::string& json) {
+		if (done)
+			done(status, Json::parse(json, nullptr, false));
+	});
+}
+
+void Bridge::dispatch(const std::string& id, const std::string& argsJson, const Sender& sender)
+{
 	auto state    = std::make_shared<Reply::State>();
-	state->sender = m_sender;
+	state->sender = sender;
 	state->id     = id;
 	Reply reply(state);
 

@@ -6,7 +6,8 @@
 #    描画    : SunsetGraphicsEngine (描画スレッドが持つ)
 #
 #  ターゲット:
-#    studio_bridge  C++ と JS の RPC (webview に依存しない。単体テストする)
+#    studio_bridge   C++ と JS の RPC (webview に依存しない。単体テストする)
+#    studio_services スキーマと JSON の橋渡し (インスペクター用。単体テストする)
 #    SunsetEditor   エディターの実行ファイル
 #    studio_ui      フロントエンドのビルド (STUDIO_BUILD_UI=ON のとき) → bin/ui/index.html
 # ============================================================
@@ -19,6 +20,17 @@ add_library(studio_bridge STATIC
 target_include_directories(studio_bridge PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(studio_bridge
     PUBLIC  nlohmann_json::nlohmann_json
+    PRIVATE studio_options
+)
+
+# ---- スキーマと Bridge の JSON の橋渡し (インスペクター用。GPU / webview に依存しない) ----
+add_library(studio_services STATIC
+    src/services/SchemaJson.h
+    src/services/SchemaJson.cpp
+)
+target_include_directories(studio_services PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(studio_services
+    PUBLIC  SunsetGraphicsEngine::schema nlohmann_json::nlohmann_json
     PRIVATE studio_options
 )
 
@@ -40,6 +52,7 @@ add_executable(SunsetEditor
 target_include_directories(SunsetEditor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(SunsetEditor PRIVATE
     studio_bridge
+    studio_services
     SunsetGraphicsEngine::core
     SunsetGraphicsEngine::schema
     MathLib::MathLib

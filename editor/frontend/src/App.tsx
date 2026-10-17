@@ -14,6 +14,7 @@ import { DockviewReact, themeDark, type DockviewReadyEvent, type IDockviewPanelP
 import 'dockview-react/dist/styles/dockview.css';
 import { call, installEventSink, isConnected, on, StudioError } from './bridge/client';
 import { PROTOCOL_VERSION, type EngineInfo } from './bridge/protocol';
+import { InspectorPanel } from './panels/InspectorPanel';
 import { LogPanel } from './panels/LogPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
 import { studioStore, useStudio } from './state/store';
@@ -29,7 +30,7 @@ function Placeholder({ text }: { text: string }) {
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   viewport: () => <ViewportPanel />,
   outliner: () => <Placeholder text="シーンとレンダーグラフ (M3 以降)" />,
-  inspector: () => <Placeholder text="記述子のフォーム (M2c)" />,
+  inspector: () => <InspectorPanel />,
   log: () => <LogPanel />,
 };
 
@@ -49,7 +50,7 @@ function onReady(event: DockviewReadyEvent) {
     component: 'inspector',
     title: 'インスペクター',
     position: { referencePanel: 'viewport', direction: 'right' },
-    initialWidth: 320,
+    initialWidth: 380,
   });
   api.addPanel({
     id: 'log',
