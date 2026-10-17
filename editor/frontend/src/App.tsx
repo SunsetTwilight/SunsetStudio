@@ -71,6 +71,7 @@ export function App() {
       if (studioStore.get().graph?.revision !== e.revision) void loadGraph().catch(() => {});
     });
     const offProject = on('project.changed', studioStore.setProject);
+    const offEdit = on('edit.changed', studioStore.setEdit);
     installEventSink();
     const off = () => {
       offLog();
@@ -78,6 +79,7 @@ export function App() {
       offStats();
       offGraph();
       offProject();
+      offEdit();
     };
 
     if (!isConnected()) {
@@ -93,6 +95,7 @@ export function App() {
         }
         studioStore.setInfo(await call('app.info'));
         studioStore.setProject(await call('project.info'));
+        studioStore.setEdit(await call('edit.state'));
       } catch (e) {
         studioStore.setConnError(e instanceof StudioError ? `${e.message} (${e.code})` : String(e));
       }
@@ -111,7 +114,36 @@ export function App() {
   }, []);
 
   const project = useStudio((s) => s.project);
+  const editState = useStudio((s) => s.edit);
   const [closeError, setCloseError] = useState('');
+  const [editError, setEditError] = useState('');
+
+  const undoRedo = useCallback(async (undo: boolean) => {
+    try {
+      setEditError('');
+      const r = await call(undo ? 'edit.undo' : 'edit.redo');
+      studioStore.setEdit(r.state);
+    } catch (e) {
+      setEditError(errorText(e));
+    }
+  }, []);
+
+  // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z (文字を入力している欄では、ブラウザの取り消しを優先する)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.altKey || e.metaKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'z' && key !== 'y') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((t as HTMLInputElement).type)))) return;
+      e.preventDefault();
+      const undo = key === 'z' && !e.shiftKey;
+      const state = studioStore.get().edit;
+      if (undo ? state?.canUndo : state?.canRedo) void undoRedo(undo);   // 履歴がなければ何もしない
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undoRedo]);
   const closeProject = async () => {
     try {
       setCloseError('');
@@ -133,8 +165,23 @@ export function App() {
             <button onClick={() => void closeProject()} title="プロジェクトを閉じて起動画面に戻る">
               閉じる
             </button>
+            <button
+              onClick={() => void undoRedo(true)}
+              disabled={!editState?.canUndo}
+              title={editState?.canUndo ? `元に戻す: ${editState.undoLabel} (Ctrl+Z)` : '元に戻す編集はありません'}
+            >
+              ↶ 元に戻す
+            </button>
+            <button
+              onClick={() => void undoRedo(false)}
+              disabled={!editState?.canRedo}
+              title={editState?.canRedo ? `やり直す: ${editState.redoLabel} (Ctrl+Y)` : 'やり直す編集はありません'}
+            >
+              ↷ やり直す
+            </button>
           </>
         )}
+        {editError && <span className="status error" title={editError}>{editError.split('\n')[0]}</span>}
         {closeError && <span className="status error">{closeError}</span>}
         <span className="spacer" />
         {project?.open && (

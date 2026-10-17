@@ -11,13 +11,16 @@
 //             graph.get / graph.set / graph.save                               (ビューポートのレンダーグラフ)
 //             project.info / project.recent / project.templates / project.open / project.create / project.close /
 //             project.layout.get / project.layout.set / dialog.openProject / dialog.pickFolder   (プロジェクト、M4a)
+//             edit.undo / edit.redo / edit.state                               (編集の履歴、M4)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
 //             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった) /
-//             project.changed (プロジェクトを開いた / 閉じた)
+//             project.changed (プロジェクトを開いた / 閉じた) / edit.changed (履歴の状態) /
+//             pipeline.changed (元に戻す / やり直すでパイプラインが変わった)
 // ============================================================
 
 #include "host/WebHost.h"
 #include "services/Project.h"
+#include "services/UndoStack.h"
 #include "render/RenderThread.h"
 #include "viewport/ViewportWindow.h"
 
@@ -60,6 +63,9 @@ private:
 
 	void registerMethods();
 	void registerProjectMethods();
+	void registerEditMethods();
+	void recordEdit(UndoStack::Entry entry);   // 描画スレッドから呼んでよい (UI スレッドで履歴に入れる)
+	void emitEditState();                      // UI スレッドから呼ぶ
 	Json projectJson() const;
 	// プロジェクトを開く (UI スレッド)。結果は done に (UI スレッドから) 返す
 	void openProject(const std::filesystem::path& file, std::function<void(bool ok, const Json& result, const std::string& error)> done);
@@ -102,6 +108,10 @@ private:
 	std::optional<Project> m_project;
 	RecentProjects         m_recent { RecentProjects::defaultFile() };
 	bool                   m_projectBusy = false;
+
+	// 編集の履歴 (UI スレッドだけが触る)
+	UndoStack              m_undo;
+	bool                   m_editBusy = false;
 	uint64_t   m_smokeFrameMark = 0;
 	int      m_exitCode      = 0;
 };

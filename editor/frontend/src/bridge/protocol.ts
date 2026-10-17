@@ -164,6 +164,16 @@ export interface ProjectTemplate {
   label: string;
 }
 
+// ---- 編集の履歴 (Undo / Redo) ----
+export interface EditState {
+  canUndo: boolean;
+  canRedo: boolean;
+  undoLabel: string;
+  redoLabel: string;
+  undoCount: number;
+  redoCount: number;
+}
+
 // JS → C++ (studio.call)
 export interface Methods {
   'schema.types': { params: Record<string, never>; result: { structs: string[]; enums: string[] } };
@@ -171,12 +181,15 @@ export interface Methods {
   'pipeline.list': { params: Record<string, never>; result: PipelineInfo[] };
   'pipeline.get': { params: { id: string }; result: { id: string; type: string; desc: JsonObject } };
   'pipeline.update': {
-    params: { id: string; desc: JsonObject };
+    params: { id: string; desc: JsonObject; label?: string };
     result: { id: string; desc: JsonObject; warnings: string[] };
   };
   'pipeline.save': { params: { id: string }; result: { id: string } };
   'graph.get': { params: Record<string, never>; result: GraphInfo };
-  'graph.set': { params: { graph: JsonObject }; result: GraphInfo };
+  'graph.set': { params: { graph: JsonObject; label?: string }; result: GraphInfo };
+  'edit.state': { params: Record<string, never>; result: EditState };
+  'edit.undo': { params: Record<string, never>; result: { label: string; kind: string; target: string; state: EditState } };
+  'edit.redo': { params: Record<string, never>; result: { label: string; kind: string; target: string; state: EditState } };
   'graph.save': { params: Record<string, never>; result: { revision: number } };
   'project.info': { params: Record<string, never>; result: ProjectInfo };
   'project.recent': { params: Record<string, never>; result: { projects: RecentProject[]; defaultLocation: string } };
@@ -201,4 +214,6 @@ export interface Events {
   stats: FrameStats;
   'graph.changed': { revision: number };
   'project.changed': ProjectInfo;
+  'edit.changed': EditState;
+  'pipeline.changed': { id: string };
 }

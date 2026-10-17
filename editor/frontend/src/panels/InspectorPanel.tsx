@@ -10,7 +10,7 @@
 //      RTV / DSV のフォーマットはパスの出力から決まるので、ここで変えても使われない。
 // ============================================================
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { call, isConnected, StudioError } from '../bridge/client';
+import { call, isConnected, on, StudioError } from '../bridge/client';
 import type { JsonObject, JsonValue, PipelineInfo, TypeDescription } from '../bridge/protocol';
 import { PassEditor, ResourceEditor } from '../inspector/GraphEditors';
 import { SchemaForm, formatPath, type Path } from '../inspector/SchemaForm';
@@ -72,6 +72,7 @@ function PipelineInspector({ want }: { want: string }) {
   // 送信中にさらに変更されたら、最後の値だけを送る
   const sending = useRef(false);
   const pending = useRef<JsonObject | null>(null);
+  const label = useRef('');   // 履歴に出す名前 (最後に変えたフィールド)
 
   const errorText = (e: unknown) => (e instanceof StudioError ? e.message : String(e));
 
@@ -107,6 +108,15 @@ function PipelineInspector({ want }: { want: string }) {
     void load(selected);
   }, [selected, load]);
 
+  // 元に戻す / やり直すで、表示しているパイプラインが変わったら読み直す
+  useEffect(
+    () =>
+      on('pipeline.changed', (e) => {
+        if (e.id === selected) void load(selected);
+      }),
+    [selected, load],
+  );
+
   const send = useCallback(
     async (next: JsonObject) => {
       if (sending.current) {
@@ -116,7 +126,7 @@ function PipelineInspector({ want }: { want: string }) {
       sending.current = true;
       setStatus({ kind: 'busy', text: '反映しています…' });
       try {
-        const res = await call('pipeline.update', { id: selected, desc: next });
+        const res = await call('pipeline.update', { id: selected, desc: next, label: label.current || `${selected} を編集` });
         setDesc(res.desc);
         setStatus({
           kind: 'ok',
@@ -139,6 +149,7 @@ function PipelineInspector({ want }: { want: string }) {
     const next = setIn(desc, path, value) as JsonObject;
     setDesc(next);
     setStatus({ kind: 'busy', text: `${formatPath(path)} を変更` });
+    label.current = `${selected}: ${formatPath(path)} = ${JSON.stringify(value)}`;
     void send(next);
   };
 
@@ -170,8 +181,8 @@ function PipelineInspector({ want }: { want: string }) {
           ))}
         </select>
         <input className="inspector-filter" placeholder="フィールドを絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <button onClick={() => load(selected)} title="エンジンの今の値を読み直す">
-          元に戻す
+        <button onClick={() => load(selected)} title="エンジンの今の値を読み直す (編集を取り消すときはツールバーの「元に戻す」)">
+          読み直す
         </button>
         <button onClick={() => void save()} disabled={!selected} title="パイプラインのアセットに書く">
           保存

@@ -18,10 +18,10 @@ export async function loadGraph(): Promise<void> {
   studioStore.setGraph(await call('graph.get'));
 }
 
-// 失敗したらエラーの文字列、成功したら null
-export async function applyGraph(next: JsonObject): Promise<string | null> {
+// 失敗したらエラーの文字列、成功したら null。label は履歴 (元に戻す / やり直す) に出す名前
+export async function applyGraph(next: JsonObject, label?: string): Promise<string | null> {
   try {
-    studioStore.setGraph(await call('graph.set', { graph: next }));
+    studioStore.setGraph(await call('graph.set', { graph: next, label }));
     return null;
   } catch (e) {
     return errorText(e);

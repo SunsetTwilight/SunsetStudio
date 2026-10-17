@@ -28,11 +28,11 @@ async function loadFormats(): Promise<string[]> {
   return formatNames;
 }
 
-function useApply() {
+function useApply(subject: string) {
   const [status, setStatus] = useState<Status>({ kind: 'idle', text: '' });
   const apply = async (next: JsonObject, what: string) => {
     setStatus({ kind: 'busy', text: `${what}…` });
-    const err = await applyGraph(next);
+    const err = await applyGraph(next, `${subject}: ${what}`);
     setStatus(err ? { kind: 'error', text: err } : { kind: 'ok', text: `${what} (反映しました)` });
   };
   return { status, apply };
@@ -81,7 +81,7 @@ function NumberBox({ value, min, step, onCommit }: { value: number; min?: number
 //  パス
 // ============================================================
 export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) {
-  const { status, apply } = useApply();
+  const { status, apply } = useApply(`パス ${name}`);
   const g = graph.graph;
   const pass = findPass(g, name);
   if (!pass) return <div className="placeholder">パス '{name}' はありません</div>;
@@ -217,7 +217,7 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
 //  リソース
 // ============================================================
 export function ResourceEditor({ graph, name }: { graph: GraphInfo; name: string }) {
-  const { status, apply } = useApply();
+  const { status, apply } = useApply(`リソース ${name}`);
   const [formats, setFormats] = useState<string[]>(formatNames ?? []);
   useEffect(() => {
     void loadFormats().then(setFormats).catch(() => setFormats([]));

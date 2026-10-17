@@ -107,6 +107,76 @@ Json graphJson(ViewportRenderer& scene)
 	};
 }
 
+// 編集の結果 (描画スレッドで作る)
+struct EditOutcome
+{
+	bool                     ok   = false;
+	BridgeError              code = BridgeError::InvalidParams;
+	std::string              message;
+	Json                     result;
+	Json                     before, after;   // 履歴に入れる内容
+	std::vector<std::string> warnings;
+};
+
+// グラフ全体の JSON に切り替える
+EditOutcome applyGraphEdit(ViewportRenderer& scene, const std::string& text)
+{
+	EditOutcome o;
+	gfx::rg::GraphDesc desc;
+	GfxJsonDiagnostics diag;
+	if (!gfx::rg::graphFromString(text, desc, &diag))
+	{
+		o.message = "グラフの JSON が不正です";
+		for (const auto& e : diag.errors) o.message += "\n" + e;
+		return o;
+	}
+	gfx::rg::GraphAsset& g = scene.graph();
+	o.before = Json::parse(gfx::rg::graphToString(g.desc()));
+	const bool ok = g.set(std::move(desc), scene.compileOptions());
+	o.message = "グラフをコンパイルできません。ビューポートは前のグラフのままです";
+	for (const auto& m : g.messages())
+		if (m.rfind("error", 0) == 0) o.message += "\n" + m;
+	g.clearStatus();
+	if (!ok)
+		return o;
+	o.ok     = true;
+	o.after  = Json::parse(gfx::rg::graphToString(g.desc()));
+	o.result = graphJson(scene);
+	return o;
+}
+
+// パイプラインのアセットの state に desc を上書きする (書かれていないフィールドは今の値のまま)
+EditOutcome applyPipelineEdit(ViewportRenderer& scene, const std::string& id, const Json& json)
+{
+	EditOutcome o;
+	const gfx::rg::PipelineAsset* current = scene.pipelines().asset(id);
+	if (!current || current->compute)
+	{
+		o.message = "パイプラインのアセット '" + id + "' を読めません";
+		return o;
+	}
+	gfx::rg::PipelineAsset next = *current;
+	o.before = structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &current->state);
+	const ApplyResult applied = applyJson(json, next.state);
+	o.warnings = applied.warnings;
+	if (!applied.ok)
+	{
+		o.message = "値が不正です";
+		for (const auto& e : applied.errors) o.message += "\n" + e;
+		return o;
+	}
+	if (!scene.pipelines().set(id, next))
+	{
+		o.code    = BridgeError::Internal;
+		o.message = "パイプラインを作り直せませんでした (理由はログを確認してください)。元の設定のままです";
+		return o;
+	}
+	o.ok    = true;
+	o.after = structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &scene.pipelines().asset(id)->state);
+	o.result = { { "id", id }, { "desc", o.after }, { "warnings", applied.warnings } };
+	return o;
+}
+
 const char* apiName(GraphicsAPI api)
 {
 	switch (api)
@@ -157,6 +227,7 @@ int EditorApp::run()
 	}
 	registerMethods();
 	registerProjectMethods();
+	registerEditMethods();
 	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
@@ -361,34 +432,24 @@ void EditorApp::registerMethods()
 	// desc は変えるフィールドだけでもよい (書かれていないフィールドは今の値のまま)。
 	// 値が不正ならエラー (フィールドのパス付き)、PSO を作れなければエラー (理由はログ) で、どちらも元のまま。
 	// ファイルには書かない (pipeline.save で書く)
+	//  label は履歴に出す名前 (省略可)
 	b.registerMethod("pipeline.update", [this, noScene](const Json& p, Bridge::Reply r) {
-		const std::string id   = p.at("id").get<std::string>();
-		const Json        json = p.at("desc");
-		m_render.postScene([this, r, id, json, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+		const std::string id    = p.at("id").get<std::string>();
+		const Json        json  = p.at("desc");
+		const std::string label = p.value("label", id + " を編集");
+		m_render.postScene([this, r, id, json, label, noScene](GraphicsEngine&, ViewportRenderer* scene) {
 			if (!scene)
 				return noScene(r);
-			const gfx::rg::PipelineAsset* current = scene->pipelines().asset(id);
-			if (!current || current->compute)
-				return r.error(BridgeError::InvalidParams, "パイプラインのアセット '" + id + "' を読めません");
-			gfx::rg::PipelineAsset next = *current;
-			const ApplyResult applied = applyJson(json, next.state);
-			for (const auto& w : applied.warnings)
+			EditOutcome o = applyPipelineEdit(*scene, id, json);
+			for (const auto& w : o.warnings)
 				log("warning", "inspector", id + ": " + w);
-			if (!applied.ok)
+			if (!o.ok)
 			{
-				std::string message = "値が不正です";
-				for (const auto& e : applied.errors)
-				{
-					message += "\n" + e;
-					log("error", "inspector", id + ": " + e);
-				}
-				return r.error(BridgeError::InvalidParams, message);
+				log("error", "inspector", id + ": " + o.message);
+				return r.error(o.code, o.message);
 			}
-			if (!scene->pipelines().set(id, next))
-				return r.error(BridgeError::Internal, "パイプラインを作り直せませんでした (理由はログを確認してください)。元の設定のままです");
-			const gfx::rg::PipelineAsset* now = scene->pipelines().asset(id);
-			r.ok({ { "id", id }, { "desc", structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &now->state) },
-			       { "warnings", applied.warnings } });
+			recordEdit({ label, "pipeline", id, std::move(o.before), std::move(o.after) });
+			r.ok(o.result);
 		});
 	});
 
@@ -415,29 +476,19 @@ void EditorApp::registerMethods()
 
 	// グラフ全体の JSON (graph.get の graph と同じ形) に切り替える。読めない / コンパイルできなければ
 	// エラー (理由とパス付き) で、ビューポートは前のグラフのまま。ファイルには書かない (graph.save で書く)
+	//  label は履歴に出す名前 (省略可)
 	b.registerMethod("graph.set", [this, noScene](const Json& p, Bridge::Reply r) {
-		const std::string text = p.at("graph").dump();
-		m_render.postScene([this, r, text, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+		const std::string text  = p.at("graph").dump();
+		const std::string label = p.value("label", std::string("グラフを編集"));
+		m_render.postScene([this, r, text, label, noScene](GraphicsEngine&, ViewportRenderer* scene) {
 			if (!scene)
 				return noScene(r);
-			gfx::rg::GraphDesc desc;
-			GfxJsonDiagnostics diag;
-			if (!gfx::rg::graphFromString(text, desc, &diag))
-			{
-				std::string message = "グラフの JSON が不正です";
-				for (const auto& e : diag.errors) message += "\n" + e;
-				return r.error(BridgeError::InvalidParams, message);
-			}
-			gfx::rg::GraphAsset& g = scene->graph();
-			const bool ok = g.set(std::move(desc), scene->compileOptions());
-			std::string message = "グラフをコンパイルできません。ビューポートは前のグラフのままです";
-			for (const auto& m : g.messages())
-				if (m.rfind("error", 0) == 0) message += "\n" + m;
-			g.clearStatus();
-			if (!ok)
-				return r.error(BridgeError::InvalidParams, message);
+			EditOutcome o = applyGraphEdit(*scene, text);
+			if (!o.ok)
+				return r.error(o.code, o.message);
 			m_render.notifyGraph();
-			r.ok(graphJson(*scene));
+			recordEdit({ label, "graph", "", std::move(o.before), std::move(o.after) });
+			r.ok(o.result);
 		});
 	});
 
@@ -661,6 +712,21 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 					m_host.bridge().callLocal("graph.set", { { "graph", original } }, [this, done](int s4, const Json& r4) {
 						if (s4 != 0 || r4["order"].size() != 4)
 							return done(false, "元に戻せない: " + r4.dump());
+						// 元に戻す (Lighting を無効にした状態) → やり直す (元のグラフ)
+						Bridge& br = m_host.bridge();
+						br.callLocal("edit.undo", Json::object(), [this, done](int u1, const Json& ru1) {
+						if (u1 != 0)
+							return done(false, "edit.undo: " + ru1.dump());
+						m_host.bridge().callLocal("graph.get", Json::object(), [this, done](int g1, const Json& rg1) {
+						if (g1 != 0 || rg1["order"].size() != 3)
+							return done(false, "元に戻したグラフが違う: " + rg1.dump());
+						m_host.bridge().callLocal("edit.redo", Json::object(), [this, done](int u2, const Json& ru2) {
+						if (u2 != 0 || ru2["state"]["canRedo"] != false)
+							return done(false, "edit.redo: " + ru2.dump());
+						m_host.bridge().callLocal("graph.get", Json::object(), [this, done](int g2, const Json& rg2) {
+						if (g2 != 0 || rg2["order"].size() != 4)
+							return done(false, "やり直したグラフが違う: " + rg2.dump());
+						log("info", "smoke", "edit.undo / edit.redo: グラフを戻してやり直した");
 						// 保存はプロジェクトの Assets/ に書く
 						m_host.bridge().callLocal("graph.save", Json::object(), [this, done](int s5, const Json& r5) {
 							if (s5 != 0)
@@ -675,6 +741,10 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 								log("info", "smoke", "graph.save: プロジェクトに保存");
 								done(true, {});
 							});
+						});
+						});
+						});
+						});
 						});
 					});
 				});
@@ -729,6 +799,8 @@ void EditorApp::openProject(const std::filesystem::path& file, std::function<voi
 					return done(false, {}, "プロジェクトのビューポートを作れません: " + error);
 				}
 				m_project = project;
+				m_undo.clear();
+				emitEditState();
 				m_host.setTitle(project.desc.name + " - SunsetEditor");
 				log("info", "project", "プロジェクトを開きました: " + pathToUtf8(project.file));
 				const Json info = projectJson();
@@ -812,6 +884,8 @@ void EditorApp::registerProjectMethods()
 		m_render.closeProject([this, r] {
 			m_host.post([this, r] {
 				m_project.reset();
+				m_undo.clear();
+				emitEditState();
 				m_host.setTitle("SunsetEditor");
 				m_host.emit("project.changed", projectJson());
 				r.ok(projectJson());
@@ -857,5 +931,71 @@ void EditorApp::registerProjectMethods()
 		const auto folder = pickFolderDialog(m_host.nativeWindow(), pathFromUtf8(p.value("initial", std::string())));
 		r.ok({ { "folder", folder ? Json(pathToUtf8(*folder)) : Json(nullptr) } });
 	});
+}
+// ============================================================
+//  編集の履歴 (M4)
+// ============================================================
+void EditorApp::recordEdit(UndoStack::Entry entry)
+{
+	m_host.post([this, entry = std::move(entry)]() mutable {
+		if (m_undo.push(std::move(entry)))
+			emitEditState();
+	});
+}
+
+void EditorApp::emitEditState()
+{
+	m_host.emit("edit.changed", m_undo.state());
+}
+
+void EditorApp::registerEditMethods()
+{
+	Bridge& b = m_host.bridge();
+
+	b.registerMethod("edit.state", [this](const Json&, Bridge::Reply r) { r.ok(m_undo.state()); });
+
+	// 元に戻す / やり直す: 履歴の before / after を、編集と同じ経路で適用する。
+	// 適用できなければ (ファイルの外部での変更で、もう成り立たないなど) エラーで、履歴はそのまま
+	auto step = [this](bool undo, Bridge::Reply r) {
+		if (m_editBusy)
+			return r.error(BridgeError::Unavailable, "元に戻す / やり直すを処理しています");
+		const UndoStack::Entry* top = undo ? m_undo.peekUndo() : m_undo.peekRedo();
+		if (!top)
+			return r.error(BridgeError::Unavailable, undo ? "元に戻す編集がありません" : "やり直す編集がありません");
+		const UndoStack::Entry entry = *top;
+		const Json target = undo ? entry.before : entry.after;
+		m_editBusy = true;
+		m_render.postScene([this, r, entry, target, undo](GraphicsEngine&, ViewportRenderer* scene) {
+			EditOutcome o;
+			if (!scene)
+				o.message = "ビューポートのシーンがありません";
+			else if (entry.kind == "graph")
+			{
+				o = applyGraphEdit(*scene, target.dump());
+				if (o.ok) m_render.notifyGraph();
+			}
+			else if (entry.kind == "pipeline")
+				o = applyPipelineEdit(*scene, entry.target, target);
+			else
+				o.message = "知らない種類の編集です: " + entry.kind;
+			m_host.post([this, r, entry, undo, o] {
+				m_editBusy = false;
+				if (!o.ok)
+				{
+					log("error", "edit", std::string(undo ? "元に戻せません: " : "やり直せません: ") + entry.label + "\n" + o.message);
+					return r.error(o.code, o.message);
+				}
+				if (undo) m_undo.didUndo();
+				else      m_undo.didRedo();
+				emitEditState();
+				if (entry.kind == "pipeline")
+					m_host.emit("pipeline.changed", { { "id", entry.target } });
+				log("info", "edit", std::string(undo ? "元に戻しました: " : "やり直しました: ") + entry.label);
+				r.ok({ { "label", entry.label }, { "kind", entry.kind }, { "target", entry.target }, { "state", m_undo.state() } });
+			});
+		});
+	};
+	b.registerMethod("edit.undo", [step](const Json&, Bridge::Reply r) { step(true, r); });
+	b.registerMethod("edit.redo", [step](const Json&, Bridge::Reply r) { step(false, r); });
 }
 } // namespace studio

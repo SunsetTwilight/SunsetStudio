@@ -50,7 +50,7 @@ export function GraphPanel() {
 
   const apply = async (next: JsonObject, what: string) => {
     setStatus({ kind: 'busy', text: `${what}…` });
-    const err = await applyGraph(next);
+    const err = await applyGraph(next, what);
     setStatus(err ? { kind: 'error', text: err } : { kind: 'ok', text: what });
   };
 

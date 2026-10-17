@@ -29,6 +29,8 @@ add_library(studio_services STATIC
     src/services/SchemaJson.cpp
     src/services/Project.h            # プロジェクトファイル (.sunsetproj) と最近のプロジェクト
     src/services/Project.cpp
+    src/services/UndoStack.h          # 編集の履歴 (Undo / Redo)
+    src/services/UndoStack.cpp
 )
 target_include_directories(studio_services PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(studio_services
@@ -84,12 +86,25 @@ add_custom_target(studio_editor_templates ALL
     VERBATIM
 )
 add_dependencies(SunsetEditor studio_editor_templates)
-# エンジンのバージョン ("v0.3.0" → "0.3")。プロジェクトファイルの engine に書き、開くときに比べる
-string(REGEX MATCH "^v?([0-9]+)\\.([0-9]+)" _studio_gfx_ver "${STUDIO_GFX_TAG}")
+# エンジンのバージョン ("0.3")。プロジェクトファイルの engine に書き、開くときに比べる。
+# 実際に使っているエンジンから取る: install 済みのパッケージなら find_package の結果、
+# ソース (FetchContent / 開発用のローカルのフォルダ) ならその CMakeLists.txt の project(VERSION)。
+# (STUDIO_GFX_TAG はキャッシュに古い値が残ることがあるので使わない)
+set(_studio_gfx_full "${SunsetGraphicsEngine_VERSION}")
+if(NOT _studio_gfx_full)
+    FetchContent_GetProperties(SunsetGraphicsEngine SOURCE_DIR _studio_gfx_src)
+    if(_studio_gfx_src AND EXISTS "${_studio_gfx_src}/CMakeLists.txt")
+        file(STRINGS "${_studio_gfx_src}/CMakeLists.txt" _studio_gfx_project REGEX "project\\(SunsetGraphicsEngine VERSION")
+        if(_studio_gfx_project MATCHES "VERSION ([0-9.]+)")
+            set(_studio_gfx_full "${CMAKE_MATCH_1}")
+        endif()
+    endif()
+endif()
 set(STUDIO_GFX_VERSION "")
-if(_studio_gfx_ver)
+if(_studio_gfx_full MATCHES "^([0-9]+)\\.([0-9]+)")
     set(STUDIO_GFX_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
 endif()
+message(STATUS "[SunsetStudio] エンジンのバージョン (プロジェクトファイル用): ${STUDIO_GFX_VERSION}")
 target_compile_definitions(SunsetEditor PRIVATE
     "STUDIO_TEMPLATE_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/templates\""
     "STUDIO_GFX_VERSION=\"${STUDIO_GFX_VERSION}\"")
