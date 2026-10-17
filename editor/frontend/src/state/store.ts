@@ -3,7 +3,13 @@
 //  パネルは dockview の中で別々に描かれるので、props ではなくここから読む (useStudio)。
 // ============================================================
 import { useSyncExternalStore } from 'react';
-import type { AppInfo, EngineInfo, FrameStats, LogEntry } from '../bridge/protocol';
+import type { AppInfo, EngineInfo, FrameStats, GraphInfo, LogEntry } from '../bridge/protocol';
+
+// インスペクターに表示するもの (グラフのパネルで選ぶ)
+export type Selection =
+  | { kind: 'pass'; name: string }
+  | { kind: 'resource'; name: string }
+  | { kind: 'pipeline'; id: string };
 
 export interface StudioState {
   info: AppInfo | null;
@@ -11,11 +17,13 @@ export interface StudioState {
   stats: FrameStats | null;
   logs: LogEntry[];
   connError: string | null;
+  graph: GraphInfo | null;
+  selection: Selection | null;
 }
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -39,6 +47,8 @@ export const studioStore = {
     set({ logs });
   },
   clearLogs: () => set({ logs: [] }),
+  setGraph: (graph: GraphInfo) => set({ graph }),
+  select: (selection: Selection | null) => set({ selection }),
 };
 
 export function useStudio<T>(select: (s: StudioState) => T): T {

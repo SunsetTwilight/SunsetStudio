@@ -26,7 +26,7 @@ SunsetEditor の土台になる部分の設計です。UI は Web 技術で作�
 │ ┌──────────────── WebView (Web UI 全体) ────────────────────────────────────────────────────────┐ │
 │ │  メニュー / ツールバー                                                                          │ │
 │ │ ┌───────────────┐ ┌────────────────────────────────────┐ ┌─────────────────────────────────┐ │ │
-│ │ │ アウトライナー │ │  <div data-viewport>  (空けておく)  │ │ インスペクター (スキーマから生成) │ │ │
+│ │ │ レンダーグラフ │ │  <div data-viewport>  (空けておく)  │ │ インスペクター (スキーマから生成) │ │ │
 │ │ │               │ │ ┌────────────────────────────────┐ │ │                                 │ │ │
 │ │ │               │ │ │ ビューポートの子ウィンドウ       │ │ │                                 │ │ │
 │ │ │               │ │ │ (エンジンのスワップチェーン)     │ │ │                                 │ │ │
@@ -104,7 +104,7 @@ bridge.registerMethod("app.info", [&](const json& params, Reply reply) {
 | `viewport.setRect` | ビューポートの矩形 (CSS px) と `devicePixelRatio` | — |
 | `viewport.setVisible` | 表示 / 非表示 | — |
 | `schema.types` / `schema.describe` | 記述子の型の一覧と、フィールド表 (名前、型、列挙子、範囲、説明) | エンジンのスキーマ (M2c で実装) |
-| `pipeline.list` / `pipeline.get` / `pipeline.update` | パイプラインの記述子の取得と変更 (変更は PSO を作り直す) | M1 の「記述子の JSON の往復」 (M2c で実装) |
+| `pipeline.list` / `pipeline.get` / `pipeline.update` | パイプラインの記述子の取得と変更 (変更は PSO を作り直す) | M1 の「記述子の JSON の往復」 (M2c で実装)。M3d でパイプラインのアセットが対象になった |
 
 ---
 
@@ -159,15 +159,20 @@ editor/
 │   ├── viewport/ViewportWindow.h   ← OS ごとの子ウィンドウの抽象
 │   ├── viewport/ViewportWindow_win32.cpp
 │   ├── render/RenderThread.{h,cpp} ← エンジンを持つスレッド、コマンドのキュー
-│   ├── render/SceneRenderer.{h,cpp}← ビューポートの描画 (M2 はサンプルのシーンを移植)
+│   ├── render/ViewportRenderer.{h,cpp} ← ビューポートをレンダーグラフで描く (M3d)
 │   └── services/                   ← app / viewport / log / stats / schema / pipeline のハンドラー
+├── assets/                         ← ビューポートのアセット (M3d)
+│   ├── graphs/viewport.json        ←   レンダーグラフ (GBuffer → Lighting → Grid → Composite)
+│   ├── pipelines/*.json            ←   パイプライン (シェーダー、バインディングレイアウト、ステート)
+│   └── shaders/*.hlsl              ←   シェーダー
 └── frontend/                       ← Vite のプロジェクト
     ├── package.json / package-lock.json / vite.config.ts / tsconfig.json / index.html
     └── src/
         ├── main.tsx / App.tsx
         ├── bridge/                 ← client.ts (call / on)、protocol.ts (型)
-        ├── panels/                 ← Viewport / Inspector / Log / Stats
-        └── inspector/SchemaForm.tsx← スキーマからフォームを生成する
+        ├── panels/                 ← Viewport / Graph / Inspector / Log
+        ├── state/                  ← store.ts (イベントの結果と選択)、graph.ts (グラフの読み込みと編集)
+        └── inspector/              ← SchemaForm.tsx (スキーマからフォーム)、GraphEditors.tsx (パスとリソース)
 tests/
 └── test_bridge.cpp                 ← Bridge のディスパッチとエラー処理の単体テスト
 ```
@@ -254,6 +259,22 @@ M2c 以降に持ち越し: ビューポートにフォーカスがあるとき�
 | 対象 | ビューポートの 2 つのパイプライン (立方体、グリッド)。レンダーグラフ (M3) ができたら、グラフのパスのパイプラインに広げる |
 | テスト | `studio_tests_unit` に `test_schema_json.cpp` (型の説明、往復、部分的な上書き、不正な値、推奨範囲の警告)。スモークテストは、ビューポートの描画のあと、`pipeline.update` を Bridge の同じ経路 (`Bridge::callLocal`) で呼び、正しい変更が反映されること、不正な値がエラーになること、元に戻したあとも描けて D3D12 のメッセージが 0 件であることを確認する (終了コード 6 = インスペクターの経路の失敗)。手元では、実際のマウスとキー入力で fillMode を Wireframe にしてビューポートに反映されることを確認した |
 | CI | スモークテストを必須にした (M2a / M2b で GitHub のランナーでも安定して通ったため)。actions を v5 に上げた |
+
+### M3d の実装状況 (完了)
+
+エンジンの M3 (レンダーグラフ) の最後の段階。ビューポートをグラフで描き、パスの一覧と GPU 時間を表示し、インスペクターでパス / リソース / パイプラインを編集する。
+
+| 項目 | 内容 |
+|------|------|
+| アセット | `editor/assets/` (`graphs/viewport.json`、`pipelines/*.json`、`shaders/*.hlsl`)。ビルドツリーの exe はソースのフォルダを直接読み書きする (保存するとその場で反映され、エディターで保存した内容はソースに残る)。配布用は `bin/assets/` にコピーする |
+| ビューポート | `ViewportRenderer` (`SceneRenderer` を置き換え): `PipelineLibrary`、`GraphAsset`、`Executor` を持ち、`IDrawListProvider` としてシーン (立方体 49 個は `Opaque`、地面のグリッドは `Grid` のレイヤー) とフレームの定数 (`frame`) を渡す。オブジェクトの定数は、オブジェクトごとの定数バッファを `DrawContext::paramOf("object")` につなぐ。グラフは GBuffer → Lighting (半球のアンビエント + ランバート + ブリン・フォン) → Grid (深度を DSVRead で読んで重ねる) → Composite (ガンマ) |
+| 変更の反映 | 描画スレッドが毎フレーム、シェーダー → パイプライン → グラフの順に変更を調べて反映し、結果をログに出す。グラフが切り替わると `graph.changed` を送り、UI が読み直す |
+| メソッド | `graph.get` (グラフの JSON、実行順、実行しないパスと理由、診断、リソースの寿命、パイプラインのアセットの一覧)、`graph.set {graph}` (グラフ全体の JSON に切り替える。読めない / コンパイルできなければ `InvalidParams` で前のまま)、`graph.save`。`pipeline.*` はパイプラインのアセット (id はパス) を対象にし、`pipeline.save` を加えた |
+| イベント | `stats` にパスごとの GPU 時間 (`passes`) とグラフ全体 (`gpuMs`) を加えた。`graph.changed {revision}` |
+| UI | レンダーグラフのパネル (`panels/GraphPanel.tsx`。アウトライナーを置き換え): パスを宣言順に並べ、実行順の番号、GPU 時間の棒、実行しない理由 (無効 / 条件 / 結果に届かない) を出す。チェックボックスで有効 / 無効、クリックでインスペクターに表示、保存。リソースの一覧、コンパイルの診断 |
+| インスペクター | 選んだものに合わせて切り替える。パス: 有効 / 無効、パイプライン (アセットの一覧から)、order、入力と出力 (リソース、使い方、load、bind の param / offset、追加と削除)。リソース: フォーマット (スキーマの GfxFormat)、大きさ、mips、samples、寿命。パイプライン: M2c のフォーム (アセットの state を編集)、保存 |
+| エンジンの修正 | 深度を DSV / DSVRead だけで使うグラフ (Lighting を無効にしたとき) で、テクスチャが DENY_SHADER_RESOURCE で作られ、DSVRead の遷移が D3D12 のエラーになっていた。Executor が一時テクスチャを常に SRV 付きで作るように直した (エンジン v0.3.0) |
+| テスト | スモークテストに、グラフの経路を加えた: `graph.set` で Grid を無効にする (実行するパスから外れる) → Lighting を無効にする (深度を SRV で読まない形。上の不具合を再現する) → コンパイルできないグラフ (Composite のパイプラインが空) がエラーになる → 元に戻す。そのあとも描けて D3D12 のメッセージが 0 件であることを確認する (終了コード 7 = グラフの経路の失敗)。手元では、WebView2 のリモートデバッグ (CDP) で DOM を操作し、パスの無効化、パスとリソースの表示、フォーマットの変更、コンパイルできない変更 (エラーで前のまま)、パイプラインの編集への切り替えを確認した |
 
 ---
 

@@ -6,8 +6,11 @@
 //  描画スレッドでエンジンを動かす。JS から呼べるメソッド (Bridge) と、JS に送るイベントをここで登録する。
 //
 //  メソッド:  ui.ready / app.info / app.ping / viewport.setRect /
-//             schema.types / schema.describe / pipeline.list / pipeline.get / pipeline.update
-//  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) / stats (フレーム時間)
+//             schema.types / schema.describe /
+//             pipeline.list / pipeline.get / pipeline.update / pipeline.save   (パイプラインのアセット)
+//             graph.get / graph.set / graph.save                               (ビューポートのレンダーグラフ)
+//  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
+//             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった)
 // ============================================================
 
 #include "host/WebHost.h"
@@ -27,7 +30,7 @@ namespace studio
 struct EditorOptions
 {
 	std::filesystem::path              uiIndex;      // 配布用の UI (<exe>/ui/index.html)
-	std::vector<std::filesystem::path> shaderDirs;   // ビューポートのシェーダー (開発時はソースのフォルダを先に)
+	std::filesystem::path              assetRoot;    // ビューポートのアセット (開発時はソースの editor/assets)
 	std::string uiDevUrl;            // STUDIO_UI_DEV_URL (Vite の開発サーバー)
 	bool        devTools  = false;   // STUDIO_DEVTOOLS=1 / Debug ビルド
 	bool        software  = false;   // --software / STUDIO_ADAPTER=software (WARP)
@@ -60,6 +63,7 @@ private:
 
 	void checkSmokeTest();   // UI スレッドから呼ぶ
 	void runInspectorSelfCheck(std::function<void(bool ok, const std::string& error)> done);
+	void runGraphSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 
 	EditorOptions  m_options;
 	WebHost        m_host;       // 破棄の順: 描画スレッド → ビューポート → WebView
@@ -79,7 +83,7 @@ private:
 	bool     m_engineDone    = false;
 	bool     m_engineOk      = false;
 	uint64_t m_framesDrawn   = 0;
-	enum class SmokeStage { WaitFrames, Inspector, WaitAfter, Finished };
+	enum class SmokeStage { WaitFrames, Inspector, Graph, WaitAfter, Finished };
 	SmokeStage m_smokeStage    = SmokeStage::WaitFrames;
 	uint64_t   m_smokeFrameMark = 0;
 	int      m_exitCode      = 0;

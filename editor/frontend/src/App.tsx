@@ -2,7 +2,7 @@
 //  SunsetEditor の画面
 //
 //    ┌ ツールバー ───────────────────────────────────────┐
-//    │ dockview: アウトライナー │ ビューポート │ インスペクター  │
+//    │ dockview: レンダーグラフ │ ビューポート │ インスペクター  │
 //    │           ログ (ビューポートの下)                       │
 //    └ ステータスバー (エンジンの状態、フレームの統計) ──────┘
 //
@@ -14,22 +14,16 @@ import { DockviewReact, themeDark, type DockviewReadyEvent, type IDockviewPanelP
 import 'dockview-react/dist/styles/dockview.css';
 import { call, installEventSink, isConnected, on, StudioError } from './bridge/client';
 import { PROTOCOL_VERSION, type EngineInfo } from './bridge/protocol';
+import { GraphPanel } from './panels/GraphPanel';
 import { InspectorPanel } from './panels/InspectorPanel';
 import { LogPanel } from './panels/LogPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
+import { loadGraph } from './state/graph';
 import { studioStore, useStudio } from './state/store';
-
-function Placeholder({ text }: { text: string }) {
-  return (
-    <div className="panel">
-      <div className="placeholder">{text}</div>
-    </div>
-  );
-}
 
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   viewport: () => <ViewportPanel />,
-  outliner: () => <Placeholder text="シーンとレンダーグラフ (M3 以降)" />,
+  graph: () => <GraphPanel />,
   inspector: () => <InspectorPanel />,
   log: () => <LogPanel />,
 };
@@ -39,11 +33,11 @@ function onReady(event: DockviewReadyEvent) {
   const api = event.api;
   api.addPanel({ id: 'viewport', component: 'viewport', title: 'ビューポート' });
   api.addPanel({
-    id: 'outliner',
-    component: 'outliner',
-    title: 'アウトライナー',
+    id: 'graph',
+    component: 'graph',
+    title: 'レンダーグラフ',
     position: { referencePanel: 'viewport', direction: 'left' },
-    initialWidth: 240,
+    initialWidth: 300,
   });
   api.addPanel({
     id: 'inspector',
@@ -70,11 +64,16 @@ export function App() {
     const offLog = on('log', studioStore.addLog);
     const offEngine = on('engine.status', studioStore.setEngine);
     const offStats = on('stats', studioStore.setStats);
+    // グラフが切り替わったら (ファイルの保存、インスペクターの編集) 読み直す
+    const offGraph = on('graph.changed', (e) => {
+      if (studioStore.get().graph?.revision !== e.revision) void loadGraph().catch(() => {});
+    });
     installEventSink();
     const off = () => {
       offLog();
       offEngine();
       offStats();
+      offGraph();
     };
 
     if (!isConnected()) {

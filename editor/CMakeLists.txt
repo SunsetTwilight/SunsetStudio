@@ -44,8 +44,8 @@ add_executable(SunsetEditor
     src/render/RenderThread.h
     src/render/RenderThread.cpp
     src/render/OrbitCamera.h
-    src/render/SceneRenderer.h
-    src/render/SceneRenderer.cpp
+    src/render/ViewportRenderer.h
+    src/render/ViewportRenderer.cpp
     src/viewport/ViewportWindow.h
     src/viewport/ViewportWindow_win32.cpp
 )
@@ -55,6 +55,7 @@ target_link_libraries(SunsetEditor PRIVATE
     studio_services
     SunsetGraphicsEngine::core
     SunsetGraphicsEngine::schema
+    SunsetGraphicsEngine::rendergraph
     MathLib::MathLib
     webview::core_static
     comctl32            # SetWindowSubclass (閉じる前にスワップチェーンを解放する)
@@ -66,20 +67,21 @@ target_compile_definitions(SunsetEditor PRIVATE
     NOMINMAX
 )
 
-# ---- ビューポートのシェーダー ----
-# editor/shaders を bin/shaders にコピーする (配布用)。ビルドツリーの exe はソースのフォルダを直接読むので、
-# 保存するとその場で反映される (ShaderLibrary のホットリロード)
-file(GLOB STUDIO_EDITOR_SHADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.hlsl*")
-target_sources(SunsetEditor PRIVATE ${STUDIO_EDITOR_SHADERS})
-set_source_files_properties(${STUDIO_EDITOR_SHADERS} PROPERTIES HEADER_FILE_ONLY TRUE)
-add_custom_target(studio_editor_shaders ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/shaders" "${CMAKE_BINARY_DIR}/bin/shaders"
-    COMMENT "Copying editor shaders to bin/shaders"
+# ---- ビューポートのアセット (レンダーグラフ、パイプライン、シェーダー) ----
+# editor/assets を bin/assets にコピーする (配布用)。ビルドツリーの exe はソースのフォルダを直接読み書きするので、
+# 保存するとその場で反映され、エディターで保存した内容はソースに残る
+file(GLOB_RECURSE STUDIO_EDITOR_ASSETS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/*.json" "${CMAKE_CURRENT_SOURCE_DIR}/assets/*.hlsl*")
+target_sources(SunsetEditor PRIVATE ${STUDIO_EDITOR_ASSETS})
+set_source_files_properties(${STUDIO_EDITOR_ASSETS} PROPERTIES HEADER_FILE_ONLY TRUE)
+add_custom_target(studio_editor_assets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "${CMAKE_BINARY_DIR}/bin/assets"
+    COMMENT "Copying editor assets to bin/assets"
     VERBATIM
 )
-add_dependencies(SunsetEditor studio_editor_shaders)
+add_dependencies(SunsetEditor studio_editor_assets)
 target_compile_definitions(SunsetEditor PRIVATE
-    "STUDIO_SHADER_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/shaders\"")
+    "STUDIO_ASSET_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/assets\"")
 
 # 本体 DLL / バックエンド DLL / dxcompiler.dll / dxil.dll を exe の横に配置する
 sunset_gfx_deploy_runtime(SunsetEditor)
@@ -90,7 +92,7 @@ set_target_properties(SunsetEditor PROPERTIES
 
 include(GNUInstallDirs)
 install(TARGETS SunsetEditor RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(DIRECTORY shaders DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(DIRECTORY assets DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 # ---- フロントエンド ----
 include(StudioFrontend)

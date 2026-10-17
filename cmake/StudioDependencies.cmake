@@ -4,7 +4,7 @@
 #  バージョンはタグ / ブランチ / コミットで固定する。更新するときはここだけを書き換える。
 #
 #  自作ライブラリ:
-#    SunsetGraphicsEngine → SunsetGraphicsEngine::core / ::schema、sunset_gfx_deploy_runtime()
+#    SunsetGraphicsEngine → SunsetGraphicsEngine::core / ::schema / ::rendergraph、sunset_gfx_deploy_runtime()
 #    SunsetMathLib        → MathLib::MathLib
 #    どちらも install 済みのパッケージがあれば find_package で優先して使う (FIND_PACKAGE_ARGS)。
 #    開発時は FETCHCONTENT_SOURCE_DIR_SUNSETGRAPHICSENGINE / FETCHCONTENT_SOURCE_DIR_SUNSETMATHLIB に
@@ -25,7 +25,7 @@ include(FetchContent)
 # ※ ブランチを指定した場合、URL が変わらないので 2 回目以降は再ダウンロードされない。
 #    最新を取り込むには build/<preset>/_deps を削除するか --fresh で構成し直す。
 set(STUDIO_GITHUB_OWNER "SunsetTwilight" CACHE STRING "自作ライブラリの GitHub のオーナー")
-set(STUDIO_GFX_TAG      "v0.2.1"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
+set(STUDIO_GFX_TAG      "v0.3.0"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
 set(STUDIO_MATHLIB_TAG  "v0.1.0"         CACHE STRING "SunsetMathLib のタグ / ブランチ / コミット")
 set(STUDIO_GFX_URL      "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetGraphicsEngine/archive/${STUDIO_GFX_TAG}.tar.gz"
     CACHE STRING "SunsetGraphicsEngine の取得元 (アーカイブの URL)")
@@ -35,7 +35,7 @@ set(STUDIO_MATHLIB_URL  "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetMathLib
 FetchContent_Declare(SunsetGraphicsEngine
     URL              ${STUDIO_GFX_URL}
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    FIND_PACKAGE_ARGS 0.2
+    FIND_PACKAGE_ARGS 0.3
 )
 FetchContent_Declare(SunsetMathLib
     URL              ${STUDIO_MATHLIB_URL}

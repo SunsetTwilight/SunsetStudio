@@ -27,9 +27,9 @@ SunsetStudio/
 │   │   ├── host/Bridge.*        ← JS → C++ の RPC (webview に依存しない)
 │   │   ├── services/SchemaJson.* ← スキーマと JSON の橋渡し (インスペクター用)
 │   │   ├── render/RenderThread.* ← エンジンを持つ描画スレッド (ビューポートのフレームのループ)
-│   │   ├── render/SceneRenderer.* ← ビューポートのシーン
+│   │   ├── render/ViewportRenderer.* ← ビューポートをレンダーグラフで描く
 │   │   └── viewport/ViewportWindow* ← ビューポートの子ウィンドウとマウスの入力
-│   ├── shaders/                ← ビューポートのシェーダー (編集するとその場で反映される)
+│   ├── assets/                 ← ビューポートのアセット (graphs/ pipelines/ shaders/。編集するとその場で反映される)
 │   └── frontend/               ← UI (React + TypeScript + Vite + dockview)
 ├── tests/                      ← 結合テスト、Bridge の単体テスト、エディターのスモークテスト (doctest)
 ├── docs/design/                ← 設計ドキュメント
@@ -137,7 +137,10 @@ build\windows-dev-debug\bin\SunsetEditor.exe
 ```
 
 ビューポートの操作: 左ドラッグで回転、中 / 右ドラッグで平行移動、ホイールでズーム、F キーで視点を戻す。
-`editor/shaders/*.hlsl` を保存すると、実行中のビューポートにその場で反映されます (ビルドツリーの exe はソースのフォルダを読みます)。
+`editor/assets/` のファイル (グラフ `graphs/viewport.json`、パイプライン `pipelines/*.json`、シェーダー `shaders/*.hlsl`) を保存すると、
+実行中のビューポートにその場で反映されます (ビルドツリーの exe はソースのフォルダを読み書きします)。
+エディターの「レンダーグラフ」パネルとインスペクターで、パスの有効 / 無効、つなぎ方、リソースのフォーマット、
+パイプラインのステートを編集して保存することもできます。
 インスペクターでは、パイプライン (立方体 / グリッド) を選び、ブレンド、ラスタライザー、深度ステンシル、入力レイアウトなどの値を変えると、すぐビューポートに反映されます。
 既定値と違うフィールドは名前が強調され、不正な値や PSO を作れない組み合わせはエラーとして表示されます (エンジン側は元のまま)。
 
@@ -153,7 +156,7 @@ C++ と JS の間のメソッドとイベントの型は `editor/frontend/src/br
 |-------|------|-----------|
 | `integration` | エンジンの DLL の配置と初期化、MathLib、スキーマ | GPU または WARP |
 | `unit` | Bridge (RPC) と、スキーマと JSON の橋渡しの単体テスト | なし |
-| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートの描画、インスペクターの経路 (`pipeline.update`) を確認し、D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
+| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートの描画、インスペクターの経路 (`pipeline.update`)、レンダーグラフの経路 (`graph.set`) を確認し、D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
 
 ```bat
 ctest --test-dir build\windows-dev-debug --output-on-failure

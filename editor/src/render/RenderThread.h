@@ -10,10 +10,11 @@
 //
 //  ビューポート (M2b): attachViewport したウィンドウが見えていて大きさがあるあいだ、
 //  毎フレーム (vsync) シーンを描く。見えていない / 最小化のあいだは描かずに待つ。
+//  M3d: シーンはレンダーグラフ (ViewportRenderer) で描き、アセットの変更を毎フレーム反映する。
 // ============================================================
 
 #include "OrbitCamera.h"
-#include "SceneRenderer.h"
+#include "ViewportRenderer.h"
 #include "viewport/ViewportWindow.h"
 
 #include "gfx/core/GraphicsEngine.h"
@@ -38,7 +39,7 @@ public:
 	struct Config
 	{
 		DeviceConfig                       device;
-		std::vector<std::filesystem::path> shaderDirs;   // ビューポートのシェーダーを探すフォルダ (先にあるものを優先)
+		std::filesystem::path              assetRoot;    // ビューポートのアセット (graphs/ pipelines/ shaders/)
 	};
 
 	struct InitResult
@@ -57,6 +58,8 @@ public:
 		uint32_t width   = 0;
 		uint32_t height  = 0;
 		uint64_t frames  = 0;   // 起動してから描いたフレーム数
+		std::vector<gfx::rg::PassTiming> passes;   // パスごとの GPU 時間 (数フレーム前のもの)
+		double   gpuMs   = 0;   // グラフ全体の GPU 時間
 	};
 
 	// 以下のコールバックはすべて描画スレッドから呼ばれる
@@ -66,6 +69,7 @@ public:
 		std::function<void(const InitResult&)>                                       init;      // エンジンの初期化の結果
 		std::function<void(const FrameStats&)>                                       stats;     // 約 0.5 秒ごと
 		std::function<void(const std::string& level, const std::string& text)>       log;       // ビューポートの状態など
+		std::function<void(uint64_t revision)>                                       graphChanged;   // グラフが切り替わった (読み直し / 編集)
 	};
 
 	RenderThread() = default;
@@ -79,7 +83,7 @@ public:
 	// (task の中で engine.isInitialized() を確認すること)。stop 後は何もしない
 	void post(Task task);
 	// 描画スレッドでシーンを使う処理を実行する。シーンを作れていなければ scene は nullptr
-	using SceneTask = std::function<void(GraphicsEngine&, SceneRenderer* scene)>;
+	using SceneTask = std::function<void(GraphicsEngine&, ViewportRenderer* scene)>;
 	void postScene(SceneTask task)
 	{
 		post([this, task = std::move(task)](GraphicsEngine& engine) { task(engine, m_sceneOk ? &m_scene : nullptr); });
@@ -103,6 +107,11 @@ private:
 	bool canRender() const;
 	void renderFrame(GraphicsEngine& engine);
 	void releaseViewport(GraphicsEngine& engine);
+	void pollAssets();
+public:
+	// グラフが切り替わっていたら graphChanged を呼ぶ (描画スレッドから。編集の処理のあとにも呼ぶ)
+	void notifyGraph();
+private:
 
 	std::thread             m_thread;
 	std::mutex              m_mutex;
@@ -113,7 +122,8 @@ private:
 	// ---- 描画スレッドだけが触る ----
 	Callbacks       m_callbacks;
 	ShaderLibrary*  m_shaders  = nullptr;
-	SceneRenderer   m_scene;
+	ViewportRenderer m_scene;
+	uint64_t        m_graphRevision = 0;
 	bool            m_sceneOk  = false;
 	ViewportWindow* m_viewport = nullptr;
 	RenderWindow*   m_window   = nullptr;

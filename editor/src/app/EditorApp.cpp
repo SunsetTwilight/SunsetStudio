@@ -4,6 +4,8 @@
 #include "EditorApp.h"
 #include "services/SchemaJson.h"
 
+#include "gfx/rendergraph/GraphJson.h"
+
 #include <algorithm>
 #include <cmath>
 #include <condition_variable>
@@ -52,6 +54,49 @@ const char* sourceName(int32_t id)
 	if (id == GFX_MESSAGE_ID_PIPELINE)       return "pipeline";
 	if (id < 0)                              return "engine";
 	return "d3d12";
+}
+
+const char* skipReasonName(gfx::rg::SkippedPass::Reason r)
+{
+	switch (r)
+	{
+	case gfx::rg::SkippedPass::Reason::Disabled:  return "disabled";
+	case gfx::rg::SkippedPass::Reason::Condition: return "condition";
+	case gfx::rg::SkippedPass::Reason::Culled:    return "culled";
+	}
+	return "";
+}
+
+// UI に送るグラフの情報 (描画スレッドで作る)
+Json graphJson(ViewportRenderer& scene)
+{
+	gfx::rg::GraphAsset& g = scene.graph();
+	const gfx::rg::CompiledGraph& c = g.compiled();
+	Json order = Json::array();
+	for (const auto& p : c.passes)
+		order.push_back(p.name);
+	Json skipped = Json::array();
+	for (const auto& sp : c.skipped)
+		skipped.push_back({ { "name", sp.name }, { "reason", skipReasonName(sp.reason) } });
+	Json diagnostics = Json::array();
+	for (const auto& d : c.diagnostics)
+		diagnostics.push_back({ { "level", d.severity == gfx::rg::Diagnostic::Severity::Error ? "error" : "warning" },
+		                        { "path", d.path }, { "text", d.message } });
+	Json resources = Json::array();
+	for (const auto& r : c.resources)
+		resources.push_back({ { "name", r.name }, { "kind", gfx::rg::nameOf(r.kind) }, { "used", r.used() },
+		                      { "firstPass", r.firstPass }, { "lastPass", r.lastPass } });
+	const std::u8string file = (std::filesystem::path("graphs") / g.file().filename()).generic_u8string();
+	return {
+		{ "file",        std::string(file.begin(), file.end()) },
+		{ "revision",    g.revision() },
+		{ "graph",       Json::parse(gfx::rg::graphToString(g.desc())) },
+		{ "order",       order },
+		{ "skipped",     skipped },
+		{ "diagnostics", diagnostics },
+		{ "resources",   resources },
+		{ "pipelines",   scene.pipelineFiles() },
+	};
 }
 
 const char* apiName(GraphicsAPI api)
@@ -111,13 +156,14 @@ int EditorApp::run()
 #ifdef STUDIO_GFX_VALIDATION
 	renderConfig.device.validation = true;
 #endif
-	renderConfig.shaderDirs = m_options.shaderDirs;
+	renderConfig.assetRoot = m_options.assetRoot;
 
 	RenderThread::Callbacks callbacks;
 	callbacks.message = [this](GfxMessageSeverity s, int32_t id, const std::string& text) { onEngineMessage(s, id, text); };
 	callbacks.init    = [this](const RenderThread::InitResult& r) { onEngineInit(r); };
 	callbacks.stats   = [this](const RenderThread::FrameStats& st) { onStats(st); };
 	callbacks.log     = [this](const std::string& level, const std::string& text) { log(level.c_str(), "viewport", text); };
+	callbacks.graphChanged = [this](uint64_t revision) { m_host.emit("graph.changed", { { "revision", revision } }); };
 	m_render.start(renderConfig, std::move(callbacks));
 	m_render.attachViewport(&m_viewport);
 
@@ -238,42 +284,55 @@ void EditorApp::registerMethods()
 			r.ok(std::move(d));
 	});
 
-	// ---- パイプライン (描画スレッドが持つので、描画スレッドで処理して返答する) ----
-	b.registerMethod("pipeline.list", [this](const Json&, Bridge::Reply r) {
-		m_render.postScene([r](GraphicsEngine&, SceneRenderer* scene) {
+	// ---- パイプラインのアセット (描画スレッドが持つので、描画スレッドで処理して返答する) ----
+	//  id はアセットのパス ("pipelines/gbuffer.json")。desc はアセットの state (GfxGraphicsPipelineDesc)。
+	//  RTV / DSV のフォーマットはパスの出力から決まるので、ここで変えても使われない
+	auto noScene = [](const Bridge::Reply& r) {
+		r.error(BridgeError::Unavailable, "ビューポートのシーンがありません (エンジンの初期化に失敗した可能性があります)");
+	};
+
+	b.registerMethod("pipeline.list", [this, noScene](const Json&, Bridge::Reply r) {
+		m_render.postScene([r, noScene](GraphicsEngine&, ViewportRenderer* scene) {
 			if (!scene)
-				return r.error(BridgeError::Unavailable, "ビューポートのシーンがありません (エンジンの初期化に失敗した可能性があります)");
+				return noScene(r);
 			Json list = Json::array();
-			for (const auto& p : scene->pipelines())
-				list.push_back({ { "id", p.id }, { "label", p.label }, { "type", "GfxGraphicsPipelineDesc" } });
+			for (const auto& path : scene->pipelineFiles())
+			{
+				const gfx::rg::PipelineAsset* a = scene->pipelines().asset(path);
+				if (a && !a->compute)
+					list.push_back({ { "id", path }, { "label", path }, { "type", "GfxGraphicsPipelineDesc" } });
+			}
 			r.ok(list);
 		});
 	});
 
-	b.registerMethod("pipeline.get", [this](const Json& p, Bridge::Reply r) {
+	b.registerMethod("pipeline.get", [this, noScene](const Json& p, Bridge::Reply r) {
 		const std::string id = p.at("id").get<std::string>();
-		m_render.postScene([r, id](GraphicsEngine& engine, SceneRenderer* scene) {
-			const auto* entry = scene ? scene->findPipeline(id) : nullptr;
-			GfxGraphicsPipelineDesc desc;
-			if (!entry || !engine.getPipelineDesc(entry->handle, desc))
-				return r.error(BridgeError::InvalidParams, "パイプライン '" + id + "' はありません");
+		m_render.postScene([r, id, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return noScene(r);
+			const gfx::rg::PipelineAsset* a = scene->pipelines().asset(id);
+			if (!a || a->compute)
+				return r.error(BridgeError::InvalidParams, "パイプラインのアセット '" + id + "' を読めません (理由はログ)");
 			r.ok({ { "id", id }, { "type", "GfxGraphicsPipelineDesc" },
-			       { "desc", structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &desc) } });
+			       { "desc", structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &a->state) } });
 		});
 	});
 
 	// desc は変えるフィールドだけでもよい (書かれていないフィールドは今の値のまま)。
-	// 値が不正ならエラー (フィールドのパス付き)、PSO を作れなければエラー (理由はログ) で、どちらも元のまま
-	b.registerMethod("pipeline.update", [this](const Json& p, Bridge::Reply r) {
+	// 値が不正ならエラー (フィールドのパス付き)、PSO を作れなければエラー (理由はログ) で、どちらも元のまま。
+	// ファイルには書かない (pipeline.save で書く)
+	b.registerMethod("pipeline.update", [this, noScene](const Json& p, Bridge::Reply r) {
 		const std::string id   = p.at("id").get<std::string>();
 		const Json        json = p.at("desc");
-		m_render.postScene([this, r, id, json](GraphicsEngine& engine, SceneRenderer* scene) {
-			const auto* entry = scene ? scene->findPipeline(id) : nullptr;
-			GfxGraphicsPipelineDesc desc;
-			if (!entry || !engine.getPipelineDesc(entry->handle, desc))
-				return r.error(BridgeError::InvalidParams, "パイプライン '" + id + "' はありません");
-
-			const ApplyResult applied = applyJson(json, desc);
+		m_render.postScene([this, r, id, json, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return noScene(r);
+			const gfx::rg::PipelineAsset* current = scene->pipelines().asset(id);
+			if (!current || current->compute)
+				return r.error(BridgeError::InvalidParams, "パイプラインのアセット '" + id + "' を読めません");
+			gfx::rg::PipelineAsset next = *current;
+			const ApplyResult applied = applyJson(json, next.state);
 			for (const auto& w : applied.warnings)
 				log("warning", "inspector", id + ": " + w);
 			if (!applied.ok)
@@ -286,14 +345,76 @@ void EditorApp::registerMethods()
 				}
 				return r.error(BridgeError::InvalidParams, message);
 			}
-			desc.debugName = nullptr;   // 名前は今のまま
-			if (!engine.updatePipeline(entry->handle, desc))
+			if (!scene->pipelines().set(id, next))
 				return r.error(BridgeError::Internal, "パイプラインを作り直せませんでした (理由はログを確認してください)。元の設定のままです");
-
-			GfxGraphicsPipelineDesc current;
-			engine.getPipelineDesc(entry->handle, current);
-			r.ok({ { "id", id }, { "desc", structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &current) },
+			const gfx::rg::PipelineAsset* now = scene->pipelines().asset(id);
+			r.ok({ { "id", id }, { "desc", structToJson(gfxStructInfo<GfxGraphicsPipelineDesc>(), &now->state) },
 			       { "warnings", applied.warnings } });
+		});
+	});
+
+	b.registerMethod("pipeline.save", [this, noScene](const Json& p, Bridge::Reply r) {
+		const std::string id = p.at("id").get<std::string>();
+		m_render.postScene([this, r, id, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return noScene(r);
+			if (!scene->pipelines().save(id))
+				return r.error(BridgeError::Internal, "保存できませんでした: " + id + " (理由はログ)");
+			log("info", "inspector", "保存しました: " + id);
+			r.ok({ { "id", id } });
+		});
+	});
+
+	// ---- ビューポートのレンダーグラフ ----
+	b.registerMethod("graph.get", [this, noScene](const Json&, Bridge::Reply r) {
+		m_render.postScene([r, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return noScene(r);
+			r.ok(graphJson(*scene));
+		});
+	});
+
+	// グラフ全体の JSON (graph.get の graph と同じ形) に切り替える。読めない / コンパイルできなければ
+	// エラー (理由とパス付き) で、ビューポートは前のグラフのまま。ファイルには書かない (graph.save で書く)
+	b.registerMethod("graph.set", [this, noScene](const Json& p, Bridge::Reply r) {
+		const std::string text = p.at("graph").dump();
+		m_render.postScene([this, r, text, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return noScene(r);
+			gfx::rg::GraphDesc desc;
+			GfxJsonDiagnostics diag;
+			if (!gfx::rg::graphFromString(text, desc, &diag))
+			{
+				std::string message = "グラフの JSON が不正です";
+				for (const auto& e : diag.errors) message += "\n" + e;
+				return r.error(BridgeError::InvalidParams, message);
+			}
+			gfx::rg::GraphAsset& g = scene->graph();
+			const bool ok = g.set(std::move(desc), scene->compileOptions());
+			std::string message = "グラフをコンパイルできません。ビューポートは前のグラフのままです";
+			for (const auto& m : g.messages())
+				if (m.rfind("error", 0) == 0) message += "\n" + m;
+			g.clearStatus();
+			if (!ok)
+				return r.error(BridgeError::InvalidParams, message);
+			m_render.notifyGraph();
+			r.ok(graphJson(*scene));
+		});
+	});
+
+	b.registerMethod("graph.save", [this, noScene](const Json&, Bridge::Reply r) {
+		m_render.postScene([this, r, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return noScene(r);
+			gfx::rg::GraphAsset& g = scene->graph();
+			const bool ok = g.save();
+			std::string message = "保存できませんでした";
+			for (const auto& m : g.messages()) message += "\n" + m;
+			g.clearStatus();
+			if (!ok)
+				return r.error(BridgeError::Internal, message);
+			log("info", "graph", "保存しました: " + g.file().filename().string());
+			r.ok({ { "revision", g.revision() } });
 		});
 	});
 }
@@ -349,6 +470,9 @@ void EditorApp::onEngineMessage(GfxMessageSeverity severity, int32_t id, const s
 void EditorApp::onStats(const RenderThread::FrameStats& s)
 {
 	// 描画スレッドから呼ばれる
+	Json passes = Json::array();
+	for (const auto& t : s.passes)
+		passes.push_back({ { "name", t.name }, { "gpuMs", t.gpuMs } });
 	m_host.emit("stats", {
 		{ "fps",     s.fps },
 		{ "frameMs", s.frameMs },
@@ -356,6 +480,8 @@ void EditorApp::onStats(const RenderThread::FrameStats& s)
 		{ "width",   s.width },
 		{ "height",  s.height },
 		{ "frames",  s.frames },
+		{ "gpuMs",   s.gpuMs },
+		{ "passes",  passes },
 	});
 	const uint64_t frames = s.frames;
 	m_host.post([this, frames] {
@@ -403,14 +529,21 @@ void EditorApp::checkSmokeTest()
 			m_host.post([this, finish, ok, error] {
 				if (!ok)
 					return finish(6, "インスペクターの経路の確認に失敗: " + error);
-				m_smokeStage    = SmokeStage::WaitAfter;
-				m_smokeFrameMark = m_framesDrawn;
-				checkSmokeTest();
+				m_smokeStage = SmokeStage::Graph;
+				runGraphSelfCheck([this, finish](bool ok2, const std::string& error2) {
+					m_host.post([this, finish, ok2, error2] {
+						if (!ok2)
+							return finish(7, "グラフの経路の確認に失敗: " + error2);
+						m_smokeStage     = SmokeStage::WaitAfter;
+						m_smokeFrameMark = m_framesDrawn;
+						checkSmokeTest();
+					});
+				});
 			});
 		});
 		return;
 	case SmokeStage::WaitAfter:
-		// パイプラインを作り直したあとも描けていること
+		// パイプラインとグラフを作り直したあとも描けていること
 		if (m_framesDrawn < m_smokeFrameMark + 20)
 			return;
 		return finish(0, "");
@@ -430,17 +563,61 @@ void EditorApp::runInspectorSelfCheck(std::function<void(bool ok, const std::str
 	const Json invalid = { { "rasterizerState", { { "cullMode", "Sideways" } } } };
 	const Json restore = { { "rasterizerState", { { "cullMode", "Back" }, { "fillMode", "Solid" } } } };
 
-	b.callLocal("pipeline.update", { { "id", "scene" }, { "desc", change } }, [this, done, invalid, restore](int status, const Json& r) {
+	const std::string id = "pipelines/gbuffer.json";
+	b.callLocal("pipeline.update", { { "id", id }, { "desc", change } }, [this, done, invalid, restore, id](int status, const Json& r) {
 		if (status != 0 || r["desc"]["rasterizerState"]["fillMode"] != "Wireframe")
 			return done(false, "変更が反映されない: " + r.dump());
 		log("info", "smoke", "pipeline.update: ワイヤーフレームに変更");
-		m_host.bridge().callLocal("pipeline.update", { { "id", "scene" }, { "desc", invalid } }, [this, done, restore](int status2, const Json& r2) {
+		m_host.bridge().callLocal("pipeline.update", { { "id", id }, { "desc", invalid } }, [this, done, restore, id](int status2, const Json& r2) {
 			if (status2 == 0 || r2.value("code", 0) != static_cast<int>(BridgeError::InvalidParams))
 				return done(false, "不正な値がエラーにならない: " + r2.dump());
-			m_host.bridge().callLocal("pipeline.update", { { "id", "scene" }, { "desc", restore } }, [done](int status3, const Json& r3) {
+			m_host.bridge().callLocal("pipeline.update", { { "id", id }, { "desc", restore } }, [done](int status3, const Json& r3) {
 				if (status3 != 0 || r3["desc"]["rasterizerState"]["cullMode"] != "Back")
 					return done(false, "元に戻せない: " + r3.dump());
 				done(true, {});
+			});
+		});
+	});
+}
+// graph.get / graph.set を、フロントエンドと同じ経路で呼ぶ
+//   1. Grid のパスを無効にすると、実行するパスから外れる
+//   2. コンパイルできないグラフ (Composite のパイプラインがない) はエラーで、前のまま
+//   3. 元に戻す
+void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string& error)> done)
+{
+	m_host.bridge().callLocal("graph.get", Json::object(), [this, done](int status, const Json& g) {
+		if (status != 0)
+			return done(false, "graph.get: " + g.dump());
+		const Json original = g["graph"];
+		auto withPass = [&](const std::string& name, const char* key, const Json& value) {
+			Json j = original;
+			for (auto& p : j["passes"])
+				if (p["name"] == name)
+					p[key] = value;
+			return j;
+		};
+		const Json noGrid     = withPass("Grid", "enabled", false);
+		const Json noLighting = withPass("Lighting", "enabled", false);   // 深度を SRV で読まない形 (DSV / DSVRead だけ)
+		const Json broken     = withPass("Composite", "pipeline", "");
+		Bridge& b = m_host.bridge();
+		b.callLocal("graph.set", { { "graph", noGrid } }, [this, done, noLighting, broken, original](int s1, const Json& r1) {
+			const auto& order = r1["order"];
+			if (s1 != 0 || std::find(order.begin(), order.end(), "Grid") != order.end())
+				return done(false, "Grid を無効にできない: " + r1.dump());
+			log("info", "smoke", "graph.set: Grid のパスを無効に変更");
+			m_host.bridge().callLocal("graph.set", { { "graph", noLighting } }, [this, done, broken, original](int s2, const Json& r2) {
+				if (s2 != 0 || r2["order"].size() != 3)
+					return done(false, "Lighting を無効にできない: " + r2.dump());
+				log("info", "smoke", "graph.set: Lighting のパスを無効に変更");
+				m_host.bridge().callLocal("graph.set", { { "graph", broken } }, [this, done, original](int s3, const Json& r3) {
+					if (s3 == 0 || r3.value("code", 0) != static_cast<int>(BridgeError::InvalidParams))
+						return done(false, "コンパイルできないグラフがエラーにならない: " + r3.dump());
+					m_host.bridge().callLocal("graph.set", { { "graph", original } }, [done](int s4, const Json& r4) {
+						if (s4 != 0 || r4["order"].size() != 4)
+							return done(false, "元に戻せない: " + r4.dump());
+						done(true, {});
+					});
+				});
 			});
 		});
 	});

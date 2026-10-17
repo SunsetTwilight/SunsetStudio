@@ -311,3 +311,138 @@ select {
 .form-error {
   padding: 8px;
 }
+
+/* ---- レンダーグラフのパネル ---- */
+.graph-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+.graph-section {
+  padding: 8px 10px 4px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.graph-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.graph-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.graph-row.selected {
+  background: rgba(232, 145, 90, 0.18);
+}
+.graph-row.skipped .graph-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.graph-order {
+  width: 22px;
+  color: var(--muted);
+  font: 11px var(--mono);
+}
+.graph-name {
+  min-width: 70px;
+}
+.graph-format {
+  margin-left: auto;
+  font: 11px var(--mono);
+}
+.graph-chip {
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.graph-time {
+  position: relative;
+  flex: 1;
+  height: 14px;
+  margin-left: 4px;
+}
+.graph-bar {
+  position: absolute;
+  left: 0;
+  top: 3px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.55;
+}
+.graph-ms {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font: 11px var(--mono);
+  color: var(--text);
+}
+.graph-diag {
+  padding: 2px 10px;
+  font: 11px/1.4 var(--mono);
+}
+.graph-diag.level-error {
+  color: var(--error);
+}
+.graph-diag.level-warning {
+  color: var(--warning);
+}
+
+/* ---- インスペクター: パスとリソース ---- */
+.graph-editor {
+  padding: 4px 0;
+}
+.ref-table {
+  margin: 8px 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.ref-head {
+  display: flex;
+  align-items: center;
+  padding: 3px 8px;
+  background: var(--panel-header);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ref-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.ref-row select {
+  max-width: 130px;
+}
+.ref-bind {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+}
+.ref-bind input.number {
+  width: 44px;
+}
+.ref-remove {
+  margin-left: auto;
+  padding: 0 6px;
+}
+.panel-header button,
+.panel-header .muted {
+  white-space: nowrap;
+}
+.graph-panel .panel-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

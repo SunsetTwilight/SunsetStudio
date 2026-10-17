@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "type": "graphics",
+  "shaders": {
+    "vs": { "file": "shaders/grid.vs.hlsl" },
+    "ps": { "file": "shaders/grid.ps.hlsl" }
+  },
+  "layout": {
+    "parameters": [ { "parameterType": "CBV", "shaderRegister": 1 } ],
+    "numParameters": 1
+  },
+  "state": {
+    "blendState": {
+      "renderTarget": [
+        { "blendEnable": true, "srcBlend": "SrcAlpha", "destBlend": "InvSrcAlpha",
+          "srcBlendAlpha": "One", "destBlendAlpha": "InvSrcAlpha" }
+      ]
+    },
+    "rasterizerState": { "cullMode": "None" },
+    "depthStencilState": { "depthFunc": "LessEqual", "depthWriteMask": "Zero" }
+  }
+}

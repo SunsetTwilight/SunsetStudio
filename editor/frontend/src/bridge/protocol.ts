@@ -31,6 +31,12 @@ export interface LogEntry {
   text: string;
 }
 
+// レンダーグラフのパスごとの GPU 時間
+export interface PassTiming {
+  name: string;
+  gpuMs: number;
+}
+
 // ビューポートのフレームの統計 (約 0.5 秒ごと)
 export interface FrameStats {
   fps: number;
@@ -39,6 +45,8 @@ export interface FrameStats {
   width: number;
   height: number;
   frames: number;
+  gpuMs: number; // グラフ全体の GPU 時間 (数フレーム前のもの)
+  passes: PassTiming[]; // パスごとの GPU 時間 (実行順)
 }
 
 // ビューポートの矩形。WebView のクライアント座標の CSS px と devicePixelRatio
@@ -101,9 +109,37 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export type JsonObject = { [key: string]: JsonValue };
 
 export interface PipelineInfo {
-  id: string;
+  id: string; // パイプラインのアセットのパス ("pipelines/gbuffer.json")
   label: string;
   type: string;
+}
+
+// ---- レンダーグラフ (ビューポート) ----
+export type SkipReason = 'disabled' | 'condition' | 'culled';
+
+export interface GraphDiagnostic {
+  level: 'error' | 'warning';
+  path: string; // "passes[Lighting].inputs[0].bind"
+  text: string;
+}
+
+export interface GraphResourceInfo {
+  name: string;
+  kind: string; // texture / buffer / imported
+  used: boolean;
+  firstPass: number;
+  lastPass: number;
+}
+
+export interface GraphInfo {
+  file: string; // "graphs/viewport.json"
+  revision: number; // 切り替わるたびに増える
+  graph: JsonObject; // グラフのアセットの JSON (エンジンの graphToJson と同じ形)
+  order: string[]; // 実行するパス (実行順)
+  skipped: { name: string; reason: SkipReason }[];
+  diagnostics: GraphDiagnostic[];
+  resources: GraphResourceInfo[];
+  pipelines: string[]; // プロジェクトのパイプラインのアセット
 }
 
 // JS → C++ (studio.call)
@@ -116,6 +152,10 @@ export interface Methods {
     params: { id: string; desc: JsonObject };
     result: { id: string; desc: JsonObject; warnings: string[] };
   };
+  'pipeline.save': { params: { id: string }; result: { id: string } };
+  'graph.get': { params: Record<string, never>; result: GraphInfo };
+  'graph.set': { params: { graph: JsonObject }; result: GraphInfo };
+  'graph.save': { params: Record<string, never>; result: { revision: number } };
   'ui.ready': { params: Record<string, never>; result: { protocol: number } };
   'app.info': { params: Record<string, never>; result: AppInfo };
   'app.ping': { params: unknown; result: { echo: unknown; uptimeMs: number } };
@@ -127,4 +167,5 @@ export interface Events {
   log: LogEntry;
   'engine.status': EngineInfo;
   stats: FrameStats;
+  'graph.changed': { revision: number };
 }

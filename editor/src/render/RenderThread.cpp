@@ -107,6 +107,37 @@ void RenderThread::releaseViewport(GraphicsEngine& engine)
 	}
 }
 
+// 保存されたアセットを反映し、結果と新しいエラーをログに出す
+void RenderThread::pollAssets()
+{
+	m_shaders->poll();   // .hlsl (使っているパイプラインはエンジンが作り直す)
+	const ViewportRenderer::PollResult r = m_scene.pollAssets();
+	auto log = [this](const char* level, const std::string& text) {
+		if (m_callbacks.log)
+			m_callbacks.log(level, text);
+	};
+	for (const auto& p : r.reloadedPipelines) log("info", "パイプラインを作り直しました: " + p);
+	for (const auto& p : r.failedPipelines)   log("warning", "パイプラインを作り直せませんでした (元のまま): " + p);
+	for (const auto& m : r.graphMessages)     log(m.rfind("error", 0) == 0 ? "error" : "warning", "グラフ: " + m);
+	if (r.graphReloaded)   log("info", "グラフを読み直しました: " + std::string(ViewportRenderer::k_GraphFile));
+	if (r.graphRecompiled) log("info", "グラフをコンパイルし直しました");
+	if (r.graphFailed)     log("warning", "グラフを読み直せませんでした (元のまま): " + std::string(ViewportRenderer::k_GraphFile));
+	for (const auto& e : m_scene.takeNewErrors())
+		log("error", e);
+	notifyGraph();
+}
+
+void RenderThread::notifyGraph()
+{
+	const uint64_t rev = m_scene.graph().revision();
+	if (rev != m_graphRevision)
+	{
+		m_graphRevision = rev;
+		if (m_callbacks.graphChanged)
+			m_callbacks.graphChanged(rev);
+	}
+}
+
 void RenderThread::renderFrame(GraphicsEngine& engine)
 {
 	const uint32_t w = m_viewport->width();
@@ -145,8 +176,8 @@ void RenderThread::renderFrame(GraphicsEngine& engine)
 
 	const auto t0 = std::chrono::steady_clock::now();
 
-	// 保存されたシェーダーを作り直す (パイプラインもエンジンが作り直す)
-	m_shaders->poll();
+	// 保存されたアセット (シェーダー、パイプライン、グラフ) を反映する
+	pollAssets();
 
 	m_camera.apply(m_viewport->takeInput(), static_cast<float>(m_windowH));
 
@@ -173,6 +204,8 @@ void RenderThread::renderFrame(GraphicsEngine& engine)
 			s.width   = m_windowW;
 			s.height  = m_windowH;
 			s.frames  = m_frames;
+			s.passes  = m_scene.executor().timings();
+			s.gpuMs   = m_scene.executor().totalGpuMs();
 			m_callbacks.stats(s);
 		}
 		m_statStart  = now;
@@ -207,8 +240,6 @@ void RenderThread::threadMain(Config config, Callbacks callbacks)
 	// ---- ビューポートのシーン ----
 	ShaderLibrary shaders(engine);
 	m_shaders = &shaders;
-	for (const auto& dir : config.shaderDirs)
-		shaders.addSearchPath(dir);
 	shaders.setOnReload([this](ShaderHandle, const std::string& path, bool ok) {
 		if (m_callbacks.log)
 			m_callbacks.log(ok ? "info" : "warning",
@@ -217,9 +248,15 @@ void RenderThread::threadMain(Config config, Callbacks callbacks)
 	if (result.ok)
 	{
 		std::string error;
-		m_sceneOk = m_scene.init(engine, shaders, error);
+		m_sceneOk = m_scene.init(engine, shaders, config.assetRoot, error);
 		if (!m_sceneOk && m_callbacks.log)
 			m_callbacks.log("error", error);
+		if (m_sceneOk)
+		{
+			for (const auto& e : m_scene.takeNewErrors())
+				if (m_callbacks.log) m_callbacks.log("error", e);
+			notifyGraph();
+		}
 	}
 
 	// ---- メインループ: 頼まれた処理を実行し、ビューポートが見えていれば 1 フレーム描く ----
