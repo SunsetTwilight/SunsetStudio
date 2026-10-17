@@ -19,6 +19,7 @@ import { GraphPanel } from './panels/GraphPanel';
 import { InspectorPanel } from './panels/InspectorPanel';
 import { LogPanel } from './panels/LogPanel';
 import { StartScreen } from './panels/StartScreen';
+import { ViewerPanel } from './panels/ViewerPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
 import { errorText, loadGraph } from './state/graph';
 import { studioStore, useStudio } from './state/store';
@@ -28,7 +29,35 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   graph: () => <GraphPanel />,
   inspector: () => <InspectorPanel />,
   log: () => <LogPanel />,
+  viewer: () => <ViewerPanel />,
 };
+
+// 開いているパネルの API (ツールバーからパネルを開くため)
+let dockApi: DockviewReadyEvent['api'] | null = null;
+const PANEL_TITLES: Record<string, string> = {
+  viewport: 'ビューポート',
+  graph: 'レンダーグラフ',
+  inspector: 'インスペクター',
+  log: 'ログ',
+  viewer: 'リソースビューアー',
+};
+
+// パネルがなければ開く (保存した配置から閉じたパネルを戻す)
+export function showPanel(id: string) {
+  if (!dockApi) return;
+  const existing = dockApi.getPanel(id);
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+  const ref = dockApi.getPanel('log') ?? dockApi.getPanel('viewport');
+  dockApi.addPanel({
+    id,
+    component: id,
+    title: PANEL_TITLES[id] ?? id,
+    position: ref ? { referencePanel: ref.id, direction: 'within' } : undefined,
+  });
+}
 
 // 既定のレイアウト
 function defaultLayout(event: DockviewReadyEvent) {
@@ -55,6 +84,13 @@ function defaultLayout(event: DockviewReadyEvent) {
     position: { referencePanel: 'viewport', direction: 'below' },
     initialHeight: 220,
   });
+  api.addPanel({
+    id: 'viewer',
+    component: 'viewer',
+    title: 'リソースビューアー',
+    position: { referencePanel: 'log', direction: 'within' },
+  });
+  api.getPanel('log')?.api.setActive();
   api.getPanel('viewport')?.api.setActive();
 }
 
@@ -72,6 +108,7 @@ export function App() {
     });
     const offProject = on('project.changed', studioStore.setProject);
     const offEdit = on('edit.changed', studioStore.setEdit);
+    const offViewer = on('viewer.pixel', studioStore.setViewerPixel);
     installEventSink();
     const off = () => {
       offLog();
@@ -80,6 +117,7 @@ export function App() {
       offGraph();
       offProject();
       offEdit();
+      offViewer();
     };
 
     if (!isConnected()) {
@@ -165,6 +203,9 @@ export function App() {
             <button onClick={() => void closeProject()} title="プロジェクトを閉じて起動画面に戻る">
               閉じる
             </button>
+            <button onClick={() => showPanel('viewer')} title="途中のテクスチャ (G-Buffer、深度など) を表示する">
+              リソースビューアー
+            </button>
             <button
               onClick={() => void undoRedo(true)}
               disabled={!editState?.canUndo}
@@ -222,6 +263,7 @@ function Workspace() {
   if (layout === undefined) return <div className="placeholder">パネルの配置を読み込んでいます…</div>;
 
   const onReady = (event: DockviewReadyEvent) => {
+    dockApi = event.api;
     let restored = false;
     if (layout && typeof layout === 'object') {
       try {

@@ -141,11 +141,24 @@ intptr_t ViewportWindow::handleMessage(unsigned msg, uintptr_t wp, intptr_t lp, 
 	case WM_CAPTURECHANGED:
 		m_drag = Drag::None;
 		return 0;
+	case WM_MOUSELEAVE:
+		m_tracking = false;
+		if (m_drag == Drag::None)
+			m_cursor = -1;
+		return 0;
 	case WM_MOUSEMOVE:
 	{
+		const int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+		// カーソルの位置 (リソースビューアーのピクセルの値に使う)
+		if (x >= 0 && y >= 0)
+			m_cursor = (static_cast<int64_t>(x) << 32) | static_cast<int64_t>(y);
+		if (!m_tracking)
+		{
+			TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwndOf(m_hwnd), 0 };
+			m_tracking = TrackMouseEvent(&tme) != FALSE;
+		}
 		if (m_drag == Drag::None)
 			return 0;
-		const int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
 		const float dx = static_cast<float>(x - m_lastX), dy = static_cast<float>(y - m_lastY);
 		m_lastX = x;
 		m_lastY = y;

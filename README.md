@@ -154,6 +154,8 @@ build\windows-dev-debug\bin\SunsetEditor.exe
 エディターの「レンダーグラフ」パネルとインスペクターで、パスの有効 / 無効、つなぎ方、リソースのフォーマット、
 パイプラインのステートを編集して保存することもできます。
 編集はツールバーの「元に戻す」「やり直す」(Ctrl+Z / Ctrl+Y) で取り消せます。
+ツールバーの「リソースビューアー」で、グラフの途中のテクスチャ (G-Buffer、深度など) をビューポートに表示し、
+カーソルの下のピクセルの値を確かめられます。
 インスペクターでは、パイプラインのアセットを選び、ブレンド、ラスタライザー、深度ステンシル、入力レイアウトなどの値を変えると、すぐビューポートに反映されます。
 既定値と違うフィールドは名前が強調され、不正な値や PSO を作れない組み合わせはエラーとして表示されます (エンジン側は元のまま)。
 
@@ -169,7 +171,7 @@ C++ と JS の間のメソッドとイベントの型は `editor/frontend/src/br
 |-------|------|-----------|
 | `integration` | エンジンの DLL の配置と初期化、MathLib、スキーマ | GPU または WARP |
 | `unit` | Bridge (RPC) と、スキーマと JSON の橋渡しの単体テスト | なし |
-| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートの描画、テンプレートから一時フォルダに作ったプロジェクト、インスペクターの経路 (`pipeline.update`)、レンダーグラフの経路 (`graph.set` と、プロジェクトへの `graph.save`) を確認し、D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
+| `editor_smoke` | `SunsetEditor --smoke-test --software`。ウィンドウを開き、UI の `ui.ready` / `app.info`、エンジンの初期化、ビューポートの描画、テンプレートから一時フォルダに作ったプロジェクト、インスペクターの経路 (`pipeline.update`)、レンダーグラフの経路 (`graph.set`、元に戻す / やり直す、プロジェクトへの `graph.save`)、リソースビューアーのピクセルの値を確認し、D3D12 のメッセージが 0 件であることを確認する | WebView2 ランタイム、デスクトップ (ラベル `gui`) |
 
 ```bat
 ctest --test-dir build\windows-dev-debug --output-on-failure

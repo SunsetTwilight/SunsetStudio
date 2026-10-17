@@ -161,7 +161,9 @@ public:
 	}
 
 	Mat4 view() const { return Mat4::lookAtRH(eye(), m_target, { 0, 1, 0 }); }
-	Mat4 projection(float aspect) const { return Mat4::perspectiveRH(m_fovY, aspect, 0.1f, 1000.0f); }
+	Mat4 projection(float aspect) const { return Mat4::perspectiveRH(m_fovY, aspect, zNear(), zFar()); }
+	float zNear() const { return 0.1f; }
+	float zFar()  const { return 1000.0f; }
 
 private:
 	Float3 m_target;

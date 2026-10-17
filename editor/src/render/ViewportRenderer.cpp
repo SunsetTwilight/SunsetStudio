@@ -78,6 +78,14 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 		return false;
 	}
 
+	// ---- リソースビューアー (作れなくてもビューポートは描く) ----
+	{
+		std::string viewerError;
+		m_viewerOk = m_viewer.init(engine, viewerError);
+		if (!m_viewerOk)
+			m_viewerError = viewerError;
+	}
+
 	// ---- メッシュと定数バッファ ----
 	std::vector<Vertex>   vertices;
 	std::vector<uint16_t> indices;
@@ -128,6 +136,8 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 	m_executor.reset();
 	m_pipelines.reset();
 	m_graph.reset();
+	m_viewer.shutdown(engine);
+	m_viewerOk = false;
 	for (auto& o : m_objects)
 		engine.destroyBuffer(o.cb);
 	m_objects.clear();
@@ -160,6 +170,11 @@ ViewportRenderer::PollResult ViewportRenderer::pollAssets()
 std::vector<std::string> ViewportRenderer::takeNewErrors()
 {
 	std::vector<std::string> out;
+	if (!m_viewerError.empty())
+	{
+		out.push_back(m_viewerError);
+		m_viewerError.clear();
+	}
 	if (!m_pipelines || !m_executor)
 		return out;
 	const auto& pe = m_pipelines->errors();
@@ -185,7 +200,8 @@ std::vector<std::string> ViewportRenderer::pipelineFiles() const
 	return out;
 }
 
-void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height, const OrbitCamera& camera)
+void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height, const OrbitCamera& camera,
+                              int cursorX, int cursorY)
 {
 	if (!rt || width == 0 || height == 0 || !m_graph || !m_graph->valid())
 		return;
@@ -214,6 +230,8 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 		return;
 	cb->begin();
 	m_executor->record(cb, m_graph->desc(), m_graph->compiled(), in);
+	if (m_viewerOk)
+		m_viewer.record(engine, cb, *m_executor, rt, width, height, cursorX, cursorY, camera.zNear(), camera.zFar());
 	cb->end();
 	engine.submitCommandBuffers({ cb });
 	cb->release();

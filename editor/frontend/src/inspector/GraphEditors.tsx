@@ -11,6 +11,7 @@ import { call } from '../bridge/client';
 import type { GraphInfo, JsonObject, JsonValue } from '../bridge/protocol';
 import { applyGraph, asArray, asObject, findPass, resourceNames, withPass, withResource } from '../state/graph';
 import { studioStore } from '../state/store';
+import { showInViewer } from '../panels/ViewerPanel';
 
 type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; text: string };
 
@@ -284,6 +285,16 @@ export function ResourceEditor({ graph, name }: { graph: GraphInfo; name: string
           <span className="form-label">bytes</span>
           <span className="form-control">
             <NumberBox value={Number(res.bytes ?? 0)} min={1} onCommit={(v) => setField('bytes', v, `bytes = ${v}`)} />
+          </span>
+        </div>
+      )}
+      {kind === 'texture' && (
+        <div className="form-row">
+          <span className="form-label">表示</span>
+          <span className="form-control">
+            <button onClick={() => showInViewer(name, String(res.format ?? ''))} title="リソースビューアーでビューポートに表示する">
+              ビューアーで表示
+            </button>
           </span>
         </div>
       )}

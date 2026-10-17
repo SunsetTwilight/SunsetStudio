@@ -174,6 +174,25 @@ export interface EditState {
   redoCount: number;
 }
 
+// ---- リソースビューアー ----
+export interface ViewerSettings {
+  enabled: boolean;
+  resource: string;
+  mip: number;
+  channels: number; // bit0 = R, bit1 = G, bit2 = B, bit3 = A
+  depthLinear: boolean;
+  exposure: number; // EV
+  rangeMin: number;
+  rangeMax: number;
+  gamma: boolean;
+  pin: [number, number] | null; // カーソルの代わりに読むテクセル
+}
+
+export interface ViewerPixel {
+  status: string; // 表示できない理由 (空なら表示できている)
+  pixel?: { resource: string; x: number; y: number; mip: number; value: number[]; distance?: number }; // distance: 深度のとき、視点からの距離
+}
+
 // JS → C++ (studio.call)
 export interface Methods {
   'schema.types': { params: Record<string, never>; result: { structs: string[]; enums: string[] } };
@@ -201,6 +220,9 @@ export interface Methods {
   'project.layout.set': { params: { layout: JsonValue }; result: Record<string, never> };
   'dialog.openProject': { params: Record<string, never>; result: { file: string | null } };
   'dialog.pickFolder': { params: { initial?: string }; result: { folder: string | null } };
+  'viewer.get': { params: Record<string, never>; result: ViewerSettings };
+  'viewer.set': { params: Partial<ViewerSettings>; result: ViewerSettings };
+  'viewer.pixel.get': { params: Record<string, never>; result: ViewerPixel };
   'ui.ready': { params: Record<string, never>; result: { protocol: number } };
   'app.info': { params: Record<string, never>; result: AppInfo };
   'app.ping': { params: unknown; result: { echo: unknown; uptimeMs: number } };
@@ -216,4 +238,5 @@ export interface Events {
   'project.changed': ProjectInfo;
   'edit.changed': EditState;
   'pipeline.changed': { id: string };
+  'viewer.pixel': ViewerPixel;
 }

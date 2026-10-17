@@ -52,6 +52,15 @@ public:
 
 	// 積もった入力を取り出して空にする (どのスレッドからでもよい)
 	CameraInput takeInput();
+	// マウスのカーソルの位置 (クライアント座標のピクセル)。ウィンドウの外なら false (どのスレッドからでもよい)
+	bool cursor(int& x, int& y) const
+	{
+		const int64_t v = m_cursor.load();
+		if (v < 0) return false;
+		x = static_cast<int>(v >> 32);
+		y = static_cast<int>(v & 0xFFFFFFFF);
+		return true;
+	}
 
 	// ウィンドウのメッセージ処理 (OS ごとの実装ファイルのウィンドウプロシージャから呼ぶ)
 	intptr_t handleMessage(unsigned msg, uintptr_t wp, intptr_t lp, bool& handled);
@@ -69,6 +78,8 @@ private:
 
 	Drag m_drag  = Drag::None;
 	int  m_lastX = 0, m_lastY = 0;
+	std::atomic<int64_t> m_cursor { -1 };   // (x << 32) | y、外なら -1
+	bool                 m_tracking = false; // WM_MOUSELEAVE を頼んだ
 
 	std::mutex  m_inputMutex;
 	CameraInput m_input;

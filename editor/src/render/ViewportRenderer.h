@@ -14,6 +14,7 @@
 // ============================================================
 
 #include "OrbitCamera.h"
+#include "ResourceViewer.h"
 
 #include "gfx/core/GraphicsEngine.h"
 #include "gfx/core/ShaderLibrary.h"
@@ -47,8 +48,13 @@ public:
 	};
 	PollResult pollAssets();
 
-	// rt (バックバッファ) に描いて submit する
-	void render(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height, const OrbitCamera& camera);
+	// rt (バックバッファ) に描いて submit する。リソースビューアーが有効なら、グラフの結果の代わりにリソースを表示する
+	// (cursorX < 0 ならカーソルはビューポートの外)
+	void render(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height, const OrbitCamera& camera,
+	            int cursorX = -1, int cursorY = -1);
+
+	ResourceViewer& viewer() { return m_viewer; }
+	bool            viewerOk() const { return m_viewerOk; }
 
 	gfx::rg::GraphAsset&            graph()     { return *m_graph; }
 	gfx::rg::PipelineLibrary&       pipelines() { return *m_pipelines; }
@@ -80,6 +86,9 @@ private:
 	std::unique_ptr<gfx::rg::GraphAsset>      m_graph;
 	gfx::rg::CompileOptions                   m_options;
 
+	ResourceViewer      m_viewer;
+	bool                m_viewerOk = false;
+	std::string         m_viewerError;
 	BufferHandle        m_vb, m_ib, m_frameCB;
 	std::vector<Object> m_objects;
 	size_t              m_reportedPipelineErrors = 0;

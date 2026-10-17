@@ -71,6 +71,8 @@ public:
 		std::function<void(const FrameStats&)>                                       stats;     // 約 0.5 秒ごと
 		std::function<void(const std::string& level, const std::string& text)>       log;       // ビューポートの状態など
 		std::function<void(uint64_t revision)>                                       graphChanged;   // グラフが切り替わった (読み直し / 編集)
+		// リソースビューアー: カーソルの下のピクセルの値 (probe.valid = false なら値はない) と、表示できない理由 (約 10 回 / 秒)
+		std::function<void(const ResourceViewer::Probe& probe, const std::string& status)> viewer;
 	};
 
 	RenderThread() = default;
@@ -139,6 +141,8 @@ private:
 	OrbitCamera     m_camera;
 
 	uint64_t        m_frames = 0;
+	std::chrono::steady_clock::time_point m_viewerReport = std::chrono::steady_clock::now();
+	ResourceViewer::Probe m_lastProbe;
 	uint64_t        m_statFrames = 0;
 	double          m_statCpuMs  = 0;
 	std::chrono::steady_clock::time_point m_statStart = std::chrono::steady_clock::now();

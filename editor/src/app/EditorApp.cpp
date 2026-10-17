@@ -228,6 +228,7 @@ int EditorApp::run()
 	registerMethods();
 	registerProjectMethods();
 	registerEditMethods();
+	registerViewerMethods();
 	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
@@ -244,6 +245,21 @@ int EditorApp::run()
 	callbacks.stats   = [this](const RenderThread::FrameStats& st) { onStats(st); };
 	callbacks.log     = [this](const std::string& level, const std::string& text) { log(level.c_str(), "viewport", text); };
 	callbacks.graphChanged = [this](uint64_t revision) { m_host.emit("graph.changed", { { "revision", revision } }); };
+	callbacks.viewer = [this](const ResourceViewer::Probe& p, const std::string& status) {
+		Json j = { { "status", status } };
+		if (p.valid)
+		{
+			j["pixel"] = { { "resource", p.resource }, { "x", p.x }, { "y", p.y }, { "mip", p.mip },
+			               { "value", { p.value[0], p.value[1], p.value[2], p.value[3] } } };
+			if (p.depth)
+				j["pixel"]["distance"] = p.distance;
+		}
+		{
+			std::lock_guard lock(m_viewerMutex);
+			m_viewerPixel = j;
+		}
+		m_host.emit("viewer.pixel", j);
+	};
 	m_render.start(renderConfig, std::move(callbacks));
 	m_render.attachViewport(&m_viewport);
 
@@ -631,14 +647,55 @@ void EditorApp::checkSmokeTest()
 					m_host.post([this, finish, ok2, error2] {
 						if (!ok2)
 							return finish(7, "グラフの経路の確認に失敗: " + error2);
-						m_smokeStage     = SmokeStage::WaitAfter;
-						m_smokeFrameMark = m_framesDrawn;
+						m_smokeStage = SmokeStage::Viewer;
+						m_viewerCheckStart = std::chrono::steady_clock::now();
+						// 中央の立方体のアルベド (0.92, 0.55, 0.30) を、画面の中央のテクセルで読む
+						m_host.bridge().callLocal("viewer.set",
+							{ { "enabled", true }, { "resource", "gbAlbedo" }, { "pin", nullptr } }, [](int, const Json&) {});
 						checkSmokeTest();
 					});
 				});
 			});
 		});
 		return;
+	case SmokeStage::Viewer:
+	{
+		// pin を画面の中央にする (テクスチャの大きさ = ビューポートの大きさ)
+		if (!m_viewerPinned)
+		{
+			m_viewerPinned = true;
+			const int cx = static_cast<int>(m_viewport.width() / 2), cy = static_cast<int>(m_viewport.height() / 2);
+			m_host.bridge().callLocal("viewer.set", { { "pin", { cx, cy } } }, [](int, const Json&) {});
+			return;
+		}
+		Json pixel;
+		{
+			std::lock_guard lock(m_viewerMutex);
+			pixel = m_viewerPixel;
+		}
+		const auto elapsed = std::chrono::steady_clock::now() - m_viewerCheckStart;
+		if (pixel.contains("pixel") && pixel["pixel"]["resource"] == "gbAlbedo")
+		{
+			const auto& v = pixel["pixel"]["value"];
+			const bool ok = std::fabs(v[0].get<float>() - 0.92f) < 0.02f && std::fabs(v[1].get<float>() - 0.55f) < 0.02f
+			             && std::fabs(v[2].get<float>() - 0.30f) < 0.02f;
+			if (!ok)
+				return finish(9, "リソースビューアーのピクセルの値が違う: " + pixel.dump());
+			log("info", "smoke", "viewer: gbAlbedo の中央のピクセル " + v.dump());
+			m_host.bridge().callLocal("viewer.set", { { "resource", "depth" }, { "depthLinear", true }, { "rangeMax", 50.0f } },
+				[this](int, const Json&) {
+					m_host.post([this] {
+						m_host.bridge().callLocal("viewer.set", { { "enabled", false }, { "pin", nullptr } }, [](int, const Json&) {});
+					});
+				});
+			m_smokeStage     = SmokeStage::WaitAfter;
+			m_smokeFrameMark = m_framesDrawn;
+			return;
+		}
+		if (elapsed > std::chrono::seconds(15))
+			return finish(9, "リソースビューアーのピクセルの値が届かない: " + pixel.dump() + " ");
+		return;
+	}
 	case SmokeStage::WaitAfter:
 		// パイプラインとグラフを作り直したあとも描けていること
 		if (m_framesDrawn < m_smokeFrameMark + 20)
@@ -997,5 +1054,70 @@ void EditorApp::registerEditMethods()
 	};
 	b.registerMethod("edit.undo", [step](const Json&, Bridge::Reply r) { step(true, r); });
 	b.registerMethod("edit.redo", [step](const Json&, Bridge::Reply r) { step(false, r); });
+}
+// ============================================================
+//  リソースビューアー (M4)
+// ============================================================
+namespace
+{
+Json viewerJson(const ResourceViewer::Settings& v)
+{
+	return {
+		{ "enabled", v.enabled }, { "resource", v.resource }, { "mip", v.mip }, { "channels", v.channels },
+		{ "depthLinear", v.depthLinear }, { "exposure", v.exposure }, { "rangeMin", v.rangeMin },
+		{ "rangeMax", v.rangeMax }, { "gamma", v.gamma }, { "pin", v.pinX >= 0 ? Json{ v.pinX, v.pinY } : Json(nullptr) },
+	};
+}
+} // namespace
+
+void EditorApp::registerViewerMethods()
+{
+	Bridge& b = m_host.bridge();
+	// 最新の viewer.pixel (イベントと同じ形)
+	b.registerMethod("viewer.pixel.get", [this](const Json&, Bridge::Reply r) {
+		std::lock_guard lock(m_viewerMutex);
+		r.ok(m_viewerPixel.is_null() ? Json{ { "status", "" } } : m_viewerPixel);
+	});
+	b.registerMethod("viewer.get", [this](const Json&, Bridge::Reply r) {
+		m_render.postScene([r](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return r.error(BridgeError::Unavailable, "プロジェクトを開いていません");
+			r.ok(viewerJson(scene->viewer().settings()));
+		});
+	});
+	// 書かれた項目だけを変える
+	b.registerMethod("viewer.set", [this](const Json& p, Bridge::Reply r) {
+		m_render.postScene([r, p](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return r.error(BridgeError::Unavailable, "プロジェクトを開いていません");
+			if (!scene->viewerOk())
+				return r.error(BridgeError::Unavailable, "リソースビューアーを使えません (理由はログ)");
+			ResourceViewer::Settings v = scene->viewer().settings();
+			try
+			{
+				if (p.contains("enabled"))     v.enabled     = p.at("enabled").get<bool>();
+				if (p.contains("resource"))    v.resource    = p.at("resource").get<std::string>();
+				if (p.contains("mip"))         v.mip         = p.at("mip").get<uint32_t>();
+				if (p.contains("channels"))    v.channels    = p.at("channels").get<uint32_t>() & 0xF;
+				if (p.contains("depthLinear")) v.depthLinear = p.at("depthLinear").get<bool>();
+				if (p.contains("exposure"))    v.exposure    = p.at("exposure").get<float>();
+				if (p.contains("rangeMin"))    v.rangeMin    = p.at("rangeMin").get<float>();
+				if (p.contains("rangeMax"))    v.rangeMax    = p.at("rangeMax").get<float>();
+				if (p.contains("gamma"))       v.gamma       = p.at("gamma").get<bool>();
+				if (p.contains("pin"))
+				{
+					const Json& pin = p.at("pin");
+					v.pinX = pin.is_array() ? pin.at(0).get<int>() : -1;
+					v.pinY = pin.is_array() ? pin.at(1).get<int>() : -1;
+				}
+			}
+			catch (const std::exception& e)
+			{
+				return r.error(BridgeError::InvalidParams, std::string("値が不正です: ") + e.what());
+			}
+			scene->viewer().settings() = v;
+			r.ok(viewerJson(v));
+		});
+	});
 }
 } // namespace studio

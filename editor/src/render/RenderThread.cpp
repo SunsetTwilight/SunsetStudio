@@ -183,7 +183,25 @@ void RenderThread::renderFrame(GraphicsEngine& engine)
 
 	if (!m_window->acquireNextBuffer())
 		return;
-	m_scene.render(engine, m_window->getRenderTarget(), m_windowW, m_windowH, m_camera);
+	int cx = -1, cy = -1;
+	if (!m_viewport->cursor(cx, cy))
+		cx = cy = -1;
+	m_scene.render(engine, m_window->getRenderTarget(), m_windowW, m_windowH, m_camera, cx, cy);
+
+	// リソースビューアーのピクセルの値と状態 (約 10 回 / 秒)
+	if (m_scene.viewerOk() && m_scene.viewer().settings().enabled)
+	{
+		const ResourceViewer::Probe p = m_scene.viewer().takeProbe(engine);
+		if (p.valid)
+			m_lastProbe = p;
+		const auto now = std::chrono::steady_clock::now();
+		if (now - m_viewerReport >= std::chrono::milliseconds(100) && m_callbacks.viewer)
+		{
+			m_viewerReport = now;
+			const bool pinned = m_scene.viewer().settings().pinX >= 0;
+			m_callbacks.viewer(cx >= 0 || pinned ? m_lastProbe : ResourceViewer::Probe{}, m_scene.viewer().status());
+		}
+	}
 	const auto t1 = std::chrono::steady_clock::now();
 	m_window->present();   // vsync で待つ
 

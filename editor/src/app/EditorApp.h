@@ -12,10 +12,12 @@
 //             project.info / project.recent / project.templates / project.open / project.create / project.close /
 //             project.layout.get / project.layout.set / dialog.openProject / dialog.pickFolder   (プロジェクト、M4a)
 //             edit.undo / edit.redo / edit.state                               (編集の履歴、M4)
+//             viewer.get / viewer.set                                          (リソースビューアー、M4)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
 //             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった) /
 //             project.changed (プロジェクトを開いた / 閉じた) / edit.changed (履歴の状態) /
-//             pipeline.changed (元に戻す / やり直すでパイプラインが変わった)
+//             pipeline.changed (元に戻す / やり直すでパイプラインが変わった) /
+//             viewer.pixel (リソースビューアーのピクセルの値と状態)
 // ============================================================
 
 #include "host/WebHost.h"
@@ -64,6 +66,7 @@ private:
 	void registerMethods();
 	void registerProjectMethods();
 	void registerEditMethods();
+	void registerViewerMethods();
 	void recordEdit(UndoStack::Entry entry);   // 描画スレッドから呼んでよい (UI スレッドで履歴に入れる)
 	void emitEditState();                      // UI スレッドから呼ぶ
 	Json projectJson() const;
@@ -99,7 +102,7 @@ private:
 	bool     m_engineDone    = false;
 	bool     m_engineOk      = false;
 	uint64_t m_framesDrawn   = 0;
-	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, WaitAfter, Finished };
+	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, WaitAfter, Finished };
 	SmokeStage m_smokeStage    = SmokeStage::WaitProject;
 	bool       m_smokeProjectFailed = false;
 	std::filesystem::path m_smokeDir;   // スモークテストのプロジェクト (一時フォルダ。終了時に消す)
@@ -112,6 +115,12 @@ private:
 	// 編集の履歴 (UI スレッドだけが触る)
 	UndoStack              m_undo;
 	bool                   m_editBusy = false;
+
+	// リソースビューアーの最新のピクセルの値 (描画スレッドが書く)
+	std::mutex             m_viewerMutex;
+	Json                   m_viewerPixel;
+	bool                   m_viewerPinned = false;   // スモークテスト
+	std::chrono::steady_clock::time_point m_viewerCheckStart;
 	uint64_t   m_smokeFrameMark = 0;
 	int      m_exitCode      = 0;
 };

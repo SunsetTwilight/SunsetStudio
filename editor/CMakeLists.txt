@@ -52,6 +52,8 @@ add_executable(SunsetEditor
     src/render/OrbitCamera.h
     src/render/ViewportRenderer.h
     src/render/ViewportRenderer.cpp
+    src/render/ResourceViewer.h
+    src/render/ResourceViewer.cpp
     src/viewport/ViewportWindow.h
     src/viewport/ViewportWindow_win32.cpp
 )
