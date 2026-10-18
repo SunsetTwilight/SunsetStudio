@@ -5,11 +5,16 @@
 //  プロジェクトファイル (.sunsetproj) と、最近のプロジェクトの一覧 (M4a)。
 //  設計: docs/design/editor-shell.md の「プロジェクトファイル」。GPU も webview も使わないので単体テストできる。
 //
-//    MyGame/
-//    ├── MyGame.sunsetproj      { "version": 1, "name": ..., "engine": ..., "assets": "Assets",
-//    │                            "viewport": { "graph": "graphs/viewport.json" } }
-//    ├── Assets/                作品のアセット (graphs/ pipelines/ shaders/)
-//    └── Saved/                 エディターが作るもの (パネルの配置など。git で管理しない)
+//  構成 (version 2、M5 から。アセットの起点はプロジェクトのフォルダ):
+//    MyWork/
+//    ├── MyWork.sunsetproj      { "version": 2, "name": ..., "engine": ..., "viewport": { "graph": "graphs/viewport.json" } }
+//    ├── scenes/ graphs/ materials/ lights/ pipelines/ shaders/   種類ごとのアセット
+//    ├── assets/                モデルとテクスチャ (中は自由に整理する)
+//    ├── Saved/                 エディターが作るもの (パネルの配置など。git で管理しない)
+//    └── Cache/                 作り直せるもの (変換したモデルなど。git で管理しない)
+//
+//  version 1 (M4a) はアセットを Assets/ (キー "assets") の下に置いた。そのまま開けて、
+//  migrateProjectLayout で Assets/ の中身を直下へ移すと version 2 になる。
 // ============================================================
 
 #include <nlohmann/json.hpp>
@@ -23,15 +28,17 @@ namespace studio
 using Json = nlohmann::json;
 
 constexpr const char* k_ProjectExtension = ".sunsetproj";
-constexpr int         k_ProjectVersion   = 1;
+constexpr int         k_ProjectVersion   = 2;   // 2: アセットの起点がプロジェクトのフォルダ (1: Assets/)
 
 struct ProjectDesc
 {
 	int         version       = k_ProjectVersion;
 	std::string name;
 	std::string engine;                                  // 作ったときのエンジンのバージョン ("0.3")
-	std::string assets        = "Assets";                // プロジェクトファイルからの相対パス
-	std::string viewportGraph = "graphs/viewport.json";  // assets からの相対パス
+	std::string assets        = ".";                     // アセットの起点 (プロジェクトファイルからの相対パス)。version 1 では "Assets"
+	std::string viewportGraph = "graphs/viewport.json";  // アセットの起点からの相対パス
+
+	bool legacyLayout() const { return version < 2; }   // Assets/ の下に置く古い構成
 };
 
 // 開いたプロジェクト (パスはすべて絶対パス)
@@ -68,6 +75,11 @@ bool saveProject(const Project& project, std::string& error);
 // dir/<name> がすでにあって空でなければ失敗する
 bool createProject(const std::filesystem::path& parentDir, const std::string& name, const std::filesystem::path& templateDir,
                    const std::string& engineVersion, Project& out, std::string& error);
+
+// version 1 (Assets/) のプロジェクトを version 2 に移す: Assets/ の中身をプロジェクトの直下へ移し、
+// Assets/ を消して、プロジェクトファイルを書き直す。直下に同じ名前のものがあれば、何も動かさずに失敗する。
+// moved に移したもの (名前) を入れる。途中で失敗したら、移したものを戻す
+bool migrateProjectLayout(Project& project, std::vector<std::string>& moved, std::string& error);
 
 // プロジェクトの名前として使えるか (ファイル名に使えない文字、空、長すぎる)
 bool isValidProjectName(const std::string& name, std::string* why = nullptr);

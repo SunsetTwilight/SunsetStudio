@@ -196,6 +196,22 @@ export function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [undoRedo]);
+  // 古い構成のプロジェクトを、直下に並べる構成に移す (ファイルを動かすので確認する)
+  const migrateProject = async () => {
+    const ok = window.confirm(
+      'Assets/ の中身 (graphs/ pipelines/ shaders/ など) をプロジェクトの直下に移し、Assets/ を消します。\n' +
+        'プロジェクトを開き直すので、元に戻す / やり直すの履歴は消えます。\n' +
+        '直下に同じ名前のフォルダがあれば、何も動かさずに中止します。\n\n移しますか？',
+    );
+    if (!ok) return;
+    try {
+      setEditError('');
+      studioStore.setProject(await call('project.migrate'));
+    } catch (e) {
+      setEditError(errorText(e));
+    }
+  };
+
   const closeProject = async () => {
     try {
       setCloseError('');
@@ -248,6 +264,12 @@ export function App() {
               ↷ やり直す
             </button>
           </>
+        )}
+        {project?.open && project.legacyLayout && (
+          <span className="chip legacy" title="アセットが Assets/ の下にある古い構成です。scenes/ graphs/ shaders/ などをプロジェクトの直下に並べる構成に移せます">
+            古い構成 (Assets/)
+            <button onClick={() => void migrateProject()}>新しい構成に移す</button>
+          </span>
         )}
         {project?.open && viewer?.enabled && viewer.resource && (
           <span className="chip viewing" title="ビューポートに、最終出力の代わりにこのリソースを表示しています">

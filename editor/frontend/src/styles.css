@@ -1027,3 +1027,7 @@ button.link:disabled {
   gap: 8px;
   justify-content: flex-end;
 }
+
+.chip.legacy {
+  border-color: var(--warn, #d7ba7d);
+}

@@ -941,7 +941,7 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 						if (g2 != 0 || rg2["order"].size() != 4)
 							return done(false, "やり直したグラフが違う: " + rg2.dump());
 						log("info", "smoke", "edit.undo / edit.redo: グラフを戻してやり直した");
-						// 保存はプロジェクトの Assets/ に書く
+						// 保存はプロジェクトのアセットの起点 (version 2 はプロジェクトのフォルダ) に書く
 						m_host.bridge().callLocal("graph.save", Json::object(), [this, done](int s5, const Json& r5) {
 							if (s5 != 0)
 								return done(false, "graph.save: " + r5.dump());
@@ -981,6 +981,7 @@ Json EditorApp::projectJson() const
 		{ "assetRoot", pathToUtf8(m_project->assetRoot()) },
 		{ "engine",    m_project->desc.engine },
 		{ "graph",     m_project->desc.viewportGraph },
+		{ "legacyLayout", m_project->desc.legacyLayout() },
 	};
 }
 
@@ -1071,7 +1072,51 @@ void EditorApp::registerProjectMethods()
 		});
 	});
 
-	// location の下に <name>/<name>.sunsetproj を作り、テンプレートを Assets/ にコピーして開く
+	// 古い構成 (version 1、Assets/) のプロジェクトを、直下に並べる構成 (version 2) に移す。
+	// 描画スレッドのシーンを閉じてから移し、開き直す (編集の履歴は消える)
+	b.registerMethod("project.migrate", [this, reply](const Json&, Bridge::Reply r) {
+		if (!m_project)
+			return r.error(BridgeError::Unavailable, "プロジェクトを開いていません");
+		if (m_projectBusy)
+			return r.error(BridgeError::Unavailable, "プロジェクトを開いています");
+		if (!m_project->desc.legacyLayout())
+			return r.error(BridgeError::InvalidParams, "すでに新しい構成です");
+		closeAllPreviews();
+		m_shaderErrors.clear();
+		if (m_viewportFrame)
+			floatViewport(false, -1, -1, [](bool, const std::string&) {});
+		m_projectBusy = true;
+		m_render.closeProject([this, r, reply] {
+			m_host.post([this, r, reply] {
+				m_projectBusy = false;
+				Project p = *m_project;
+				std::vector<std::string> moved;
+				std::string error;
+				const bool migrated = migrateProjectLayout(p, moved, error);
+				if (migrated)
+				{
+					std::string list;
+					for (const auto& m : moved) list += (list.empty() ? "" : ", ") + m;
+					log("info", "project", "新しい構成に移しました (Assets/ から直下へ: " + list + ")");
+				}
+				else
+					log("error", "project", "新しい構成に移せませんでした: " + error);
+				// 移せても移せなくても開き直す
+				openProject(p.file, [this, r, reply, migrated, error](bool ok, const Json& result, const std::string& err) {
+					if (ok)
+					{
+						m_recent.add(*m_project);
+						m_recent.save();
+					}
+					if (!migrated)
+						return r.error(BridgeError::InvalidParams, error);
+					reply(r)(ok, result, err);
+				});
+			});
+		});
+	});
+
+	// location の下に <name>/<name>.sunsetproj を作り、テンプレートの中身を直下にコピーして開く
 	b.registerMethod("project.create", [this, reply](const Json& p, Bridge::Reply r) {
 		const std::string           name     = p.at("name").get<std::string>();
 		const std::filesystem::path location = pathFromUtf8(p.at("location").get<std::string>());

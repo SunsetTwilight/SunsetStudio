@@ -11,6 +11,7 @@
 //             graph.get / graph.set / graph.save                               (ビューポートのレンダーグラフ)
 //             project.info / project.recent / project.templates / project.open / project.create / project.close /
 //             project.layout.get / project.layout.set / dialog.openProject / dialog.pickFolder   (プロジェクト、M4a)
+//             project.migrate (Assets/ の古い構成を、直下に並べる構成に移す、M5)
 //             edit.undo / edit.redo / edit.state                               (編集の履歴、M4)
 //             viewer.get / viewer.set                                          (リソースビューアー、M4)
 //             preview.open / preview.set / preview.setRect / preview.close / preview.list

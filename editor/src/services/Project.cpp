@@ -25,7 +25,11 @@ std::string pathToUtf8(const fs::path& p)
 
 fs::path Project::assetRoot() const
 {
-	return (dir() / pathFromUtf8(desc.assets)).lexically_normal();
+	fs::path r = (dir() / pathFromUtf8(desc.assets)).lexically_normal();
+	// "." (version 2) だと末尾に区切りが残るので取る (比べたり、相対パスを作ったりするため)
+	if (!r.has_filename() && r.has_parent_path() && r != r.root_path())
+		r = r.parent_path();
+	return r;
 }
 
 // ============================================================
@@ -38,7 +42,8 @@ Json projectToJson(const ProjectDesc& d)
 	j["name"]    = d.name;
 	if (!d.engine.empty())
 		j["engine"] = d.engine;
-	j["assets"]   = d.assets;
+	if (d.legacyLayout())
+		j["assets"] = d.assets;   // version 2 はプロジェクトのフォルダが起点なので書かない
 	j["viewport"] = { { "graph", d.viewportGraph } };
 	return j;
 }
@@ -52,6 +57,8 @@ bool projectFromJson(const Json& json, ProjectDesc& out, ProjectDiagnostics& dia
 		return false;
 	}
 	ProjectDesc d;
+	d.version = 1;   // version のないファイルは M4a の形
+	bool hasAssets = false;
 	auto str = [&](const Json& v, const std::string& path, std::string& dst) {
 		if (v.is_string()) dst = v.get<std::string>();
 		else diag.errors.push_back(path + ": 文字列が必要です");
@@ -70,7 +77,7 @@ bool projectFromJson(const Json& json, ProjectDesc& out, ProjectDiagnostics& dia
 		}
 		else if (key == "name")   str(v, "name", d.name);
 		else if (key == "engine") str(v, "engine", d.engine);
-		else if (key == "assets") str(v, "assets", d.assets);
+		else if (key == "assets") { str(v, "assets", d.assets); hasAssets = true; }
 		else if (key == "viewport")
 		{
 			if (!v.is_object()) { diag.errors.push_back("viewport: オブジェクトが必要です"); continue; }
@@ -83,6 +90,14 @@ bool projectFromJson(const Json& json, ProjectDesc& out, ProjectDiagnostics& dia
 		else
 			diag.warnings.push_back(key + ": 知らないキーなので無視します");
 	}
+	if (d.version >= 2)
+	{
+		if (hasAssets && d.assets != ".")
+			diag.warnings.push_back("assets: version 2 ではプロジェクトのフォルダが起点なので無視します");
+		d.assets = ".";
+	}
+	else if (!hasAssets)
+		d.assets = "Assets";
 	if (d.assets.empty())
 		diag.errors.push_back("assets: アセットのフォルダが空です");
 	if (pathFromUtf8(d.assets).is_absolute())
@@ -134,6 +149,9 @@ bool writeTextAtomic(const fs::path& p, const std::string& text, std::string& er
 	}
 	return true;
 }
+
+// Saved/ と Cache/ はエディターが作るもの (git で管理しない)
+const char* k_GitIgnore = "Saved/\nCache/\n";
 
 // "0.3" と "0.10" を数値として比べる (a > b なら正)
 int compareVersion(const std::string& a, const std::string& b)
@@ -196,6 +214,82 @@ bool saveProject(const Project& project, std::string& error)
 	return writeTextAtomic(project.file, projectToJson(project.desc).dump(2) + "\n", error);
 }
 
+bool migrateProjectLayout(Project& project, std::vector<std::string>& moved, std::string& error)
+{
+	moved.clear();
+	if (!project.desc.legacyLayout())
+		return error = "すでに新しい構成です", false;
+	std::error_code ec;
+	const fs::path src = project.assetRoot();
+	const fs::path dst = project.dir();
+	if (src == dst || !fs::is_directory(src, ec))
+		return error = "アセットのフォルダがありません: " + pathToUtf8(src), false;
+
+	// 先に、直下に同じ名前のものがないかを全部確かめる (何も動かさずに失敗する)
+	std::vector<fs::path> entries;
+	std::vector<std::string> conflicts;
+	for (const auto& e : fs::directory_iterator(src, ec))
+	{
+		entries.push_back(e.path());
+		const fs::path target = dst / e.path().filename();
+		if (fs::exists(target, ec) && !fs::equivalent(target, src, ec))
+			conflicts.push_back(pathToUtf8(e.path().filename()));
+	}
+	if (ec)
+		return error = "アセットのフォルダを読めません: " + ec.message(), false;
+	if (!conflicts.empty())
+	{
+		error = "プロジェクトの直下に同じ名前のものがあるので移せません:";
+		for (const auto& c : conflicts) error += " " + c;
+		return false;
+	}
+
+	// 移す (失敗したら、移したものを戻す)
+	std::vector<fs::path> done;
+	for (const auto& from : entries)
+	{
+		const fs::path to = dst / from.filename();
+		fs::rename(from, to, ec);
+		if (ec)
+		{
+			error = "移せません: " + pathToUtf8(from.filename()) + " (" + ec.message() + ")";
+			for (auto it = done.rbegin(); it != done.rend(); ++it)
+			{
+				std::error_code ec2;
+				fs::rename(dst / it->filename(), *it, ec2);
+			}
+			return false;
+		}
+		done.push_back(from);
+		moved.push_back(pathToUtf8(from.filename()));
+	}
+	fs::remove(src, ec);   // 空になった Assets/ (Windows では assets/ と同じ名前になるので、先に消す)
+	if (ec)
+		return error = "Assets/ を消せません (中身は移しました): " + ec.message(), false;
+	for (const char* d : { "scenes", "graphs", "materials", "lights", "pipelines", "shaders", "assets" })
+		fs::create_directories(dst / d, ec);
+
+	ProjectDesc next = project.desc;
+	next.version = k_ProjectVersion;
+	next.assets  = ".";
+	Project updated = project;
+	updated.desc = next;
+	if (!saveProject(updated, error))
+		return false;
+	// .gitignore に Cache/ を足す (なければ作る)
+	std::string ignore;
+	readText(dst / ".gitignore", ignore);
+	if (ignore.find("Cache/") == std::string::npos)
+	{
+		if (!ignore.empty() && ignore.back() != '\n') ignore += "\n";
+		ignore += ignore.find("Saved/") == std::string::npos ? k_GitIgnore : "Cache/\n";
+		std::string e2;
+		writeTextAtomic(dst / ".gitignore", ignore, e2);
+	}
+	project = std::move(updated);
+	return true;
+}
+
 bool isValidProjectName(const std::string& name, std::string* why)
 {
 	auto fail = [&](const char* w) { if (why) *why = w; return false; };
@@ -240,14 +334,16 @@ bool createProject(const fs::path& parentDir, const std::string& name, const fs:
 		error = "フォルダを作れません: " + pathToUtf8(dir) + " (" + ec.message() + ")";
 		return false;
 	}
-	fs::copy(templateDir, dir / "Assets", fs::copy_options::recursive, ec);
+	// テンプレートの中身 (graphs/ pipelines/ shaders/ など) を、そのままプロジェクトの直下に置く (version 2)
+	fs::copy(templateDir, dir, fs::copy_options::recursive, ec);
 	if (ec)
 	{
 		error = "テンプレートをコピーできません: " + ec.message();
 		return false;
 	}
-	// Saved/ はエディターが作るもの (git で管理しない)
-	if (!writeTextAtomic(dir / ".gitignore", "Saved/\n", error))
+	for (const char* d : { "scenes", "graphs", "materials", "lights", "pipelines", "shaders", "assets" })
+		fs::create_directories(dir / d, ec);
+	if (!writeTextAtomic(dir / ".gitignore", k_GitIgnore, error))
 		return false;
 
 	Project p;

@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 #include "services/Project.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -46,9 +47,27 @@ TEST_CASE("プロジェクト: JSON の読み書きと診断")
 	REQUIRE(projectFromJson(projectToJson(d), back, diag));
 	CHECK(back.name == "MyGame");
 	CHECK(back.engine == "0.3");
-	CHECK(back.assets == "Assets");
+	CHECK(back.version == 2);
+	CHECK(back.assets == ".");   // version 2 はプロジェクトのフォルダが起点
+	CHECK_FALSE(back.legacyLayout());
+	CHECK_FALSE(projectToJson(d).contains("assets"));
 	CHECK(back.viewportGraph == "graphs/viewport.json");
 	CHECK(diag.warnings.empty());
+
+	// version 1 (M4a): assets があればそれ、なければ Assets
+	ProjectDiagnostics d1;
+	REQUIRE(projectFromJson({ { "version", 1 }, { "name", "Old" }, { "assets", "Assets" } }, back, d1));
+	CHECK(back.legacyLayout());
+	CHECK(back.assets == "Assets");
+	CHECK(projectToJson(back)["assets"] == "Assets");
+	REQUIRE(projectFromJson({ { "name", "NoVersion" } }, back, d1));
+	CHECK(back.version == 1);
+	CHECK(back.assets == "Assets");
+	// version 2 の assets は無視して警告
+	ProjectDiagnostics d1w;
+	REQUIRE(projectFromJson({ { "version", 2 }, { "assets", "Elsewhere" } }, back, d1w));
+	CHECK(back.assets == ".");
+	CHECK(hasPrefix(d1w.warnings, "assets"));
 
 	// 型の違いはエラー、知らないキーは警告
 	ProjectDiagnostics d2;
@@ -75,10 +94,19 @@ TEST_CASE("プロジェクト: テンプレートから作って開く")
 	std::string error;
 	REQUIRE_MESSAGE(createProject(root / "projects", "MyGame", tmpl, "0.3", p, error), error);
 	CHECK(p.file == (root / "projects" / "MyGame" / "MyGame.sunsetproj").lexically_normal());
-	CHECK(fs::exists(p.assetRoot() / "graphs" / "viewport.json"));
-	CHECK(fs::exists(p.assetRoot() / "shaders" / "a.hlsl"));
+	CHECK(p.assetRoot() == p.dir());   // version 2: 直下に並べる
+	CHECK(fs::exists(p.dir() / "graphs" / "viewport.json"));
+	CHECK(fs::exists(p.dir() / "shaders" / "a.hlsl"));
+	for (const char* d : { "scenes", "materials", "lights", "pipelines", "assets" })
+		CHECK_MESSAGE(fs::is_directory(p.dir() / d), d);
+	CHECK_FALSE(fs::exists(p.dir() / "Assets" / "graphs"));
 	CHECK(fs::is_directory(p.savedDir()));
-	CHECK(fs::exists(p.dir() / ".gitignore"));
+	{
+		std::ifstream f(p.dir() / ".gitignore");
+		std::string ignore((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		CHECK(ignore.find("Saved/") != std::string::npos);
+		CHECK(ignore.find("Cache/") != std::string::npos);
+	}
 
 	// 開く
 	Project opened;
@@ -102,8 +130,8 @@ TEST_CASE("プロジェクト: テンプレートから作って開く")
 	CHECK_FALSE(isValidProjectName("x."));
 	CHECK(isValidProjectName("My Game 2"));
 
-	// アセットのフォルダがない / 壊れた JSON
-	fs::remove_all(p.assetRoot());
+	// version 1 でアセットのフォルダがない / 壊れた JSON
+	writeText(p.file, R"({ "version": 1, "name": "MyGame", "assets": "Missing" })");
 	ProjectDiagnostics noAssets;
 	CHECK_FALSE(loadProject(p.file, opened, noAssets));
 	CHECK(hasPrefix(noAssets.errors, "assets"));
@@ -155,6 +183,81 @@ TEST_CASE("プロジェクト: 最近のプロジェクトの一覧")
 	RecentProjects broken(file);
 	broken.load();
 	CHECK(broken.entries().empty());
+
+	fs::remove_all(root);
+}
+
+namespace
+{
+// M4a (version 1) の形のプロジェクトを作る
+fs::path makeLegacyProject(const fs::path& dir)
+{
+	writeText(dir / "Old.sunsetproj", R"({ "version": 1, "name": "Old", "engine": "0.4", "assets": "Assets", "viewport": { "graph": "graphs/viewport.json" } })");
+	writeText(dir / "Assets" / "graphs" / "viewport.json", "{}");
+	writeText(dir / "Assets" / "shaders" / "a.hlsl", "// a");
+	writeText(dir / "Saved" / "Layout.json", "{}");
+	writeText(dir / ".gitignore", "Saved/\n");
+	return dir / "Old.sunsetproj";
+}
+} // namespace
+
+TEST_CASE("プロジェクト: version 1 (Assets/) を開いて、新しい構成に移す")
+{
+	const fs::path root = freshDir("studio_tests_project_migrate");
+	const fs::path file = makeLegacyProject(root / "Old");
+
+	Project p;
+	ProjectDiagnostics diag;
+	REQUIRE(loadProject(file, p, diag));
+	CHECK(p.desc.legacyLayout());
+	CHECK(p.assetRoot() == (root / "Old" / "Assets").lexically_normal());
+
+	std::vector<std::string> moved;
+	std::string error;
+	REQUIRE_MESSAGE(migrateProjectLayout(p, moved, error), error);
+	std::sort(moved.begin(), moved.end());
+	CHECK(moved == std::vector<std::string>{ "graphs", "shaders" });
+	CHECK_FALSE(p.desc.legacyLayout());
+	CHECK(p.assetRoot() == p.dir());
+	CHECK(fs::exists(p.dir() / "graphs" / "viewport.json"));
+	CHECK(fs::exists(p.dir() / "shaders" / "a.hlsl"));
+	CHECK(fs::exists(p.dir() / "Saved" / "Layout.json"));   // Saved/ はそのまま
+	CHECK(fs::is_directory(p.dir() / "assets"));             // Assets/ を消してから、モデル用の assets/ を作る
+	CHECK_FALSE(fs::exists(p.dir() / "assets" / "graphs"));
+	{
+		std::ifstream f(p.dir() / ".gitignore");
+		std::string ignore((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		CHECK(ignore == "Saved/\nCache/\n");
+	}
+
+	// 書き直したプロジェクトファイルは version 2 として開ける。2 回目の移行はしない
+	Project reopened;
+	ProjectDiagnostics d2;
+	REQUIRE(loadProject(file, reopened, d2));
+	CHECK_FALSE(reopened.desc.legacyLayout());
+	CHECK(reopened.assetRoot() == reopened.dir());
+	CHECK_FALSE(migrateProjectLayout(reopened, moved, error));
+
+	fs::remove_all(root);
+}
+
+TEST_CASE("プロジェクト: 直下に同じ名前があれば、何も動かさずに失敗する")
+{
+	const fs::path root = freshDir("studio_tests_project_conflict");
+	const fs::path file = makeLegacyProject(root / "Old");
+	writeText(root / "Old" / "shaders" / "mine.txt", "x");   // 直下にすでに shaders/
+
+	Project p;
+	ProjectDiagnostics diag;
+	REQUIRE(loadProject(file, p, diag));
+	std::vector<std::string> moved;
+	std::string error;
+	CHECK_FALSE(migrateProjectLayout(p, moved, error));
+	CHECK(error.find("shaders") != std::string::npos);
+	CHECK(moved.empty());
+	CHECK(p.desc.legacyLayout());
+	CHECK(fs::exists(root / "Old" / "Assets" / "graphs" / "viewport.json"));
+	CHECK(fs::exists(root / "Old" / "Assets" / "shaders" / "a.hlsl"));
 
 	fs::remove_all(root);
 }

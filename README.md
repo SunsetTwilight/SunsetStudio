@@ -121,11 +121,17 @@ build\windows-dev-debug\bin\SunsetEditor.exe D:\Work\MyGame\MyGame.sunsetproj
 テンプレートから新しいプロジェクトを作ります。プロジェクトは次の形です (詳しくは docs/design/editor-shell.md の「プロジェクトファイル」)。
 
 ```
-MyGame/
-├── MyGame.sunsetproj   ← プロジェクトファイル (JSON)
-├── Assets/             ← グラフ、パイプライン、シェーダー (git で管理する)
-└── Saved/              ← パネルの配置など (git で管理しない)
+MyWork/
+├── MyWork.sunsetproj   ← プロジェクトファイル (JSON)
+├── graphs/ pipelines/ shaders/       ← レンダーグラフ、パイプライン、シェーダー (git で管理する)
+├── scenes/ materials/ lights/        ← シーン、マテリアル、ライトの種類 (M5 で使う)
+├── assets/             ← モデルとテクスチャ (M5 で使う)
+├── Saved/              ← パネルの配置など (git で管理しない)
+└── Cache/              ← 作り直せるもの (git で管理しない)
 ```
+
+以前の構成 (アセットを `Assets/` の下に置いたプロジェクト) もそのまま開けます。ツールバーの「新しい構成に移す」で、
+`Assets/` の中身を直下へ移せます (直下に同じ名前のものがあれば、何も動かさずに中止します)。
 
 | 指定 | 内容 |
 |------|------|
@@ -149,7 +155,7 @@ build\windows-dev-debug\bin\SunsetEditor.exe
 ```
 
 ビューポートの操作: 左ドラッグで回転、中 / 右ドラッグで平行移動、ホイールでズーム、F キーで視点を戻す。
-開いたプロジェクトの `Assets/` のファイル (グラフ `graphs/viewport.json`、パイプライン `pipelines/*.json`、シェーダー `shaders/*.hlsl`) を保存すると、
+開いたプロジェクトのファイル (グラフ `graphs/viewport.json`、パイプライン `pipelines/*.json`、シェーダー `shaders/*.hlsl`) を保存すると、
 実行中のビューポートにその場で反映されます。
 エディターの「レンダーグラフ」パネルとインスペクターで、パスの有効 / 無効、つなぎ方、リソースのフォーマット、
 パイプラインのステートを編集して保存することもできます。

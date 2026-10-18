@@ -151,6 +151,7 @@ export interface ProjectInfo {
   assetRoot?: string;
   engine?: string;
   graph?: string;
+  legacyLayout?: boolean; // 古い構成 (Assets/ の下)。project.migrate で直下に並べる構成に移せる
 }
 
 export interface RecentProject {
@@ -264,6 +265,7 @@ export interface Methods {
   'project.open': { params: { file: string }; result: ProjectInfo };
   'project.create': { params: { location: string; name: string; template: string }; result: ProjectInfo };
   'project.close': { params: Record<string, never>; result: ProjectInfo };
+  'project.migrate': { params: Record<string, never>; result: ProjectInfo };
   'project.layout.get': { params: Record<string, never>; result: { layout: JsonValue } };
   'project.layout.set': { params: { layout: JsonValue }; result: Record<string, never> };
   'dialog.openProject': { params: Record<string, never>; result: { file: string | null } };
