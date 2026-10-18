@@ -6,6 +6,8 @@
 //                   ビューポートはネイティブの子ウィンドウなので、C++ が別ウィンドウに移す (viewport.float)
 //    watchDragOut   タブをウィンドウの外へドラッグして離したら、そのパネルを別ウィンドウにする
 //    openPreviewTab リソースのプレビューをタブ (パネル) で開く。外へ出すとネイティブの別ウィンドウにする
+//    openAssetTab   シェーダー / パイプラインの JSON をタブで編集する (Monaco)
+//    openPipelineTab パイプラインのタブ (シェーダーとのつながり、リフレクション)
 // ============================================================
 import type { DockviewApi } from 'dockview-react';
 import { call, isConnected } from '../bridge/client';
@@ -45,8 +47,8 @@ export function showPanel(id: string) {
   });
 }
 
-// popout の窓に読み込むページ。配布時の UI は about:blank (webview_set_html) なので、同じ about:blank を開く。
-// 開発サーバーでは public/popout.html
+// popout の窓に読み込むページ。配布時 (仮想ホスト) と開発サーバーは public/popout.html (同じオリジン)。
+// 仮想ホストを使えない古いランタイムで webview_set_html を使ったときは about:blank
 function popoutUrl(): string {
   return location.protocol === 'about:' ? 'about:blank' : '/popout.html';
 }
@@ -89,6 +91,40 @@ function logError(text: string) {
 }
 
 export const PREVIEW_PREFIX = 'preview:';
+export const ASSET_PREFIX = 'asset:';
+export const PIPELINE_PREFIX = 'pipeline:';
+
+// 編集のタブの置き場所: ほかの編集のタブがあればその隣、なければビューポートの右
+function openEditorTab(id: string, component: string, title: string, params: Record<string, unknown>) {
+  if (!dockApi) return;
+  const existing = dockApi.getPanel(id);
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+  const other = dockApi.panels.find((p) => p.id.startsWith(ASSET_PREFIX) || p.id.startsWith(PIPELINE_PREFIX));
+  const viewport = dockApi.getPanel('viewport');
+  dockApi.addPanel({
+    id,
+    component,
+    title,
+    params,
+    position: other
+      ? { referencePanel: other.id, direction: 'within' }
+      : viewport
+        ? { referencePanel: viewport.id, direction: 'right' }
+        : undefined,
+    initialWidth: 560,
+  });
+}
+
+export function openAssetTab(path: string) {
+  openEditorTab(ASSET_PREFIX + path, 'asset', path.slice(path.lastIndexOf('/') + 1), { path });
+}
+
+export function openPipelineTab(path: string) {
+  openEditorTab(PIPELINE_PREFIX + path, 'pipeline', `パイプライン: ${path.slice(path.lastIndexOf('/') + 1)}`, { id: path });
+}
 
 // リソースのプレビューをタブで開く。同じリソースのタブがあれば前に出す。
 // 置き場所: ほかのプレビューのタブがあればその隣 (同じグループ)、なければビューポートの右

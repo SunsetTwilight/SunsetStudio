@@ -25,11 +25,19 @@ export interface StudioState {
   viewerPixel: ViewerPixel | null;
   previews: PreviewInfo[]; // 別ウィンドウのプレビュー
   viewportFloating: boolean; // ビューポートを別ウィンドウにしている
+  shaderErrors: Record<string, string>; // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ)
+  pipelineShaders: Record<string, PipelineShaders>; // パイプラインのアセット → シェーダーのファイル
+}
+
+export interface PipelineShaders {
+  vs?: string;
+  ps?: string;
+  cs?: string;
 }
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, shaderErrors: {}, pipelineShaders: {} };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -60,12 +68,20 @@ export const studioStore = {
   setViewerPixel: (viewerPixel: ViewerPixel) => set({ viewerPixel }),
   setPreviews: (previews: PreviewInfo[]) => set({ previews }),
   setViewportFloating: (viewportFloating: boolean) => set({ viewportFloating }),
+  setShaderErrors: (shaderErrors: Record<string, string>) => set({ shaderErrors }),
+  setShaderStatus(path: string, ok: boolean, text: string) {
+    const next = { ...state.shaderErrors };
+    if (ok) delete next[path];
+    else next[path] = text;
+    set({ shaderErrors: next });
+  },
+  setPipelineShaders: (pipelineShaders: Record<string, PipelineShaders>) => set({ pipelineShaders }),
   // プロジェクトが変わったら、前のプロジェクトのグラフと選択と統計は捨てる
   setProject: (project: ProjectInfo) =>
     set(
       state.project?.file === project.file && state.project?.open === project.open
         ? { project }
-        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null },
+        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {} },
     ),
 };
 

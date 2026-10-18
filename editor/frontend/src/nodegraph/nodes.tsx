@@ -14,6 +14,8 @@ export interface NodeRuntime {
   order?: number; // 実行順 (1 から)
   errors: string[];
   warnings: string[];
+  shader?: string; // パイプラインの PS (Compute なら CS) のファイル名
+  shaderErrors?: string[]; // コンパイルに失敗しているシェーダー
 }
 
 export type PassFlowData = PassNodeData & { runtime: NodeRuntime };
@@ -52,7 +54,15 @@ export function PassNode({ data, selected }: NodeProps & { data: PassFlowData })
         {rt.order !== undefined && <span className="rf-order">#{rt.order}</span>}
         <span className="rf-ms">{rt.skipped ? '' : rt.gpuMs !== undefined ? `${rt.gpuMs.toFixed(3)} ms` : ''}</span>
       </div>
-      <div className="rf-sub">{rt.skipped ? rt.skipped : data.pipeline ? baseName(data.pipeline) : data.type === 'Copy' ? 'コピー' : '(パイプラインなし)'}</div>
+      <div className="rf-sub">
+        {rt.skipped ? rt.skipped : data.pipeline ? baseName(data.pipeline) : data.type === 'Copy' ? 'コピー' : '(パイプラインなし)'}
+        {!rt.skipped && rt.shader && <span className="rf-shader"> · {rt.shader}</span>}
+        {rt.shaderErrors && rt.shaderErrors.length > 0 && (
+          <span className="rf-shader-error" title={`コンパイルできないシェーダー (描画は前のまま): ${rt.shaderErrors.join(', ')}`}>
+            エラー {rt.shaderErrors.length}
+          </span>
+        )}
+      </div>
       <div className="rf-rows">
         {Array.from({ length: rows }, (_, i) => {
           const input = data.inputs[i];

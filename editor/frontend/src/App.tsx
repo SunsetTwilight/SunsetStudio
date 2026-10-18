@@ -21,6 +21,9 @@ import { InspectorPanel } from './panels/InspectorPanel';
 import { LogPanel } from './panels/LogPanel';
 import { StartScreen } from './panels/StartScreen';
 import { PreviewPanel, type PreviewParams } from './panels/PreviewPanel';
+import { AssetPanel, type AssetParams } from './panels/AssetPanel';
+import { PipelinePanel, type PipelineParams } from './panels/PipelinePanel';
+import { loadPipelineShaders, loadShaderErrors } from './state/assets';
 import { setViewer, ViewerPanel } from './panels/ViewerPanel';
 import { NodeEditorPanel } from './nodegraph/NodeEditorPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
@@ -36,6 +39,8 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   viewer: () => <ViewerPanel />,
   nodes: () => <NodeEditorPanel />,
   preview: (props) => <PreviewPanel {...(props as IDockviewPanelProps<PreviewParams>)} />,
+  asset: (props) => <AssetPanel {...(props as IDockviewPanelProps<AssetParams>)} />,
+  pipeline: (props) => <PipelinePanel {...(props as IDockviewPanelProps<PipelineParams>)} />,
 };
 
 // 既定のレイアウト
@@ -96,6 +101,7 @@ export function App() {
     const offViewer = on('viewer.pixel', studioStore.setViewerPixel);
     const offPreview = on('preview.changed', (e) => studioStore.setPreviews(e.previews));
     const offFloat = on('viewport.changed', (e) => studioStore.setViewportFloating(e.floating));
+    const offShader = on('shader.status', (e) => studioStore.setShaderStatus(e.path, e.ok, e.text));
     installEventSink();
     const off = () => {
       offLog();
@@ -107,6 +113,7 @@ export function App() {
       offViewer();
       offPreview();
       offFloat();
+      offShader();
     };
 
     if (!isConnected()) {
@@ -152,7 +159,14 @@ export function App() {
     call('viewer.get').then(studioStore.setViewer).catch(() => {});
     call('preview.list').then((r) => studioStore.setPreviews(r.previews)).catch(() => {});
     call('viewport.state').then((r) => studioStore.setViewportFloating(r.floating)).catch(() => {});
+    void loadShaderErrors();
   }, [project?.open, project?.file]);
+
+  // パイプラインが使うシェーダー (ノードの表示と右クリックのメニュー)。グラフが変わったら読み直す
+  const graphPipelines = useStudio((s) => s.graph?.pipelines.join('\n') ?? '');
+  useEffect(() => {
+    if (isConnected() && project?.open && graphPipelines) void loadPipelineShaders(graphPipelines.split('\n'));
+  }, [graphPipelines, project?.open]);
   const [closeError, setCloseError] = useState('');
   const [editError, setEditError] = useState('');
 

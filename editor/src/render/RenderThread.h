@@ -77,6 +77,8 @@ public:
 		std::function<void(uint64_t revision)>                                       graphChanged;   // グラフが切り替わった (読み直し / 編集)
 		// リソースビューアー: カーソルの下のピクセルの値 (probe.valid = false なら値はない) と、表示できない理由 (約 10 回 / 秒)
 		std::function<void(const ResourceViewer::Probe& probe, const std::string& status)> viewer;
+		// シェーダーのホットリロードの結果 (path はエンジンが使ったパス)
+		std::function<void(const std::string& path, bool ok)> shaderReloaded;
 		// プレビューの表示できない理由が変わった (空なら表示できている)
 		std::function<void(uint32_t id, const std::string& status)> previewStatus;
 	};

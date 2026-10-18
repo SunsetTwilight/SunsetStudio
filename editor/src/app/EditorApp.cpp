@@ -230,6 +230,7 @@ int EditorApp::run()
 	registerEditMethods();
 	registerViewerMethods();
 	registerWindowMethods();
+	registerAssetMethods();
 	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
@@ -260,6 +261,10 @@ int EditorApp::run()
 			m_viewerPixel = j;
 		}
 		m_host.emit("viewer.pixel", j);
+	};
+	callbacks.shaderReloaded = [this](const std::string& path, bool ok) {
+		if (ok)
+			m_host.post([this, path] { onShaderStatus(path, true, {}); });
 	};
 	callbacks.previewStatus = [this](uint32_t id, const std::string& status) {
 		m_host.post([this, id, status] { onPreviewStatus(id, status); });
@@ -586,6 +591,8 @@ void EditorApp::onEngineMessage(GfxMessageSeverity severity, int32_t id, const s
 	// D3D12 のデバッグレイヤーのエラー / 警告 (id >= 0)。スモークテストでは 0 件であることを確認する
 	if (id >= 0 && severity <= GfxMessageSeverity::Warning)
 		++m_d3dProblems;
+	if (captureShaderMessage(id, text))
+		return;
 	log(severityName(severity), sourceName(id), text, id);
 }
 
@@ -784,8 +791,15 @@ void EditorApp::checkSmokeTest()
 		case 6:
 			if (!m_previews.empty())
 				return;
-			m_smokeStage     = SmokeStage::WaitAfter;
-			m_smokeFrameMark = m_framesDrawn;
+			m_smokeStage = SmokeStage::Shader;
+			runShaderSelfCheck([this, finish](bool ok, const std::string& error) {
+				m_host.post([this, finish, ok, error] {
+					if (!ok)
+						return finish(11, "シェーダー編集の経路の確認に失敗: " + error);
+					m_smokeStage     = SmokeStage::WaitAfter;
+					m_smokeFrameMark = m_framesDrawn;
+				});
+			});
 			return;
 		default:
 			return;
@@ -799,6 +813,54 @@ void EditorApp::checkSmokeTest()
 	default:
 		return;
 	}
+}
+
+// シェーダー編集の経路を、フロントエンドと同じ Bridge のメソッドで呼ぶ
+//   1. asset.read で composite.ps.hlsl を読み、shader.compile が通ってリフレクション (t0 gScene) が返る
+//   2. 壊した内容 (保存しない) はエラーになり、メッセージに行番号が付く。ログには出さない
+//   3. テンプレートのシェーダーとパイプラインを作り、コンパイルが通る
+void EditorApp::runShaderSelfCheck(std::function<void(bool ok, const std::string& error)> done)
+{
+	Bridge& b = m_host.bridge();
+	b.callLocal("asset.read", { { "path", "shaders/composite.ps.hlsl" } }, [this, done](int s1, const Json& r1) {
+		if (s1 != 0)
+			return done(false, "asset.read: " + r1.dump());
+		const std::string text = r1.at("text").get<std::string>();
+		m_host.bridge().callLocal("shader.compile", { { "path", "shaders/composite.ps.hlsl" } }, [this, done, text](int s2, const Json& r2) {
+			bool hasScene = false;
+			if (s2 == 0 && r2.contains("reflection"))
+				for (const auto& bnd : r2["reflection"]["bindings"])
+					hasScene = hasScene || bnd.value("name", std::string()) == "gScene";
+			if (s2 != 0 || !r2.value("ok", false) || !hasScene)
+				return done(false, "shader.compile (正しい内容): " + r2.dump().substr(0, 400));
+			const std::string broken = text + "\nfloat4 broken( { return 0 }\n";
+			m_host.bridge().callLocal("shader.compile", { { "path", "shaders/composite.ps.hlsl" }, { "text", broken } },
+				[this, done](int s3, const Json& r3) {
+					const std::string msg = r3.value("messages", std::string());
+					if (s3 != 0 || r3.value("ok", true) || msg.find("composite.ps.hlsl") == std::string::npos)
+						return done(false, "shader.compile (壊した内容): " + r3.dump().substr(0, 400));
+					log("info", "smoke", "shader.compile: 正しい内容は通り、壊した内容はエラー");
+					m_host.post([this, done] {
+						const std::string ps = "shaders/smoke_new.ps.hlsl";
+						m_host.bridge().callLocal("asset.create", { { "template", "shader.fullscreen.ps" }, { "path", ps } }, [this, done, ps](int s4, const Json& r4) {
+							if (s4 != 0)
+								return done(false, "asset.create (shader): " + r4.dump());
+							m_host.bridge().callLocal("asset.create", { { "template", "pipeline.fullscreen" }, { "path", "pipelines/smoke_new.json" }, { "shader", ps } },
+								[this, done, ps](int s5, const Json& r5) {
+									if (s5 != 0)
+										return done(false, "asset.create (pipeline): " + r5.dump());
+									m_host.bridge().callLocal("shader.compile", { { "path", ps } }, [this, done](int s6, const Json& r6) {
+										if (s6 != 0 || !r6.value("ok", false))
+											return done(false, "テンプレートのシェーダーがコンパイルできない: " + r6.dump().substr(0, 400));
+										log("info", "smoke", "asset.create: テンプレートのシェーダーとパイプラインを作った");
+										done(true, {});
+									});
+								});
+						});
+					});
+				});
+		});
+	});
 }
 
 // pipeline.get / pipeline.update を、フロントエンドと同じ経路 (Bridge のメソッド) で呼ぶ
@@ -939,6 +1001,7 @@ void EditorApp::openProject(const std::filesystem::path& file, std::function<voi
 
 	m_projectBusy = true;
 	closeAllPreviews();   // 前のプロジェクトのリソースを表示している
+	m_shaderErrors.clear();
 	m_render.openProject(project.assetRoot(), project.desc.viewportGraph,
 		[this, project, done](bool ok, const std::string& error) {
 			// 描画スレッドから呼ばれる
@@ -1035,6 +1098,7 @@ void EditorApp::registerProjectMethods()
 		if (m_projectBusy)
 			return r.error(BridgeError::Unavailable, "プロジェクトを開いています");
 		closeAllPreviews();
+		m_shaderErrors.clear();
 		if (m_viewportFrame)
 			floatViewport(false, -1, -1, [](bool, const std::string&) {});
 		m_render.closeProject([this, r] {

@@ -16,12 +16,15 @@
 //             preview.open / preview.set / preview.setRect / preview.close / preview.list
 //                                                                              (プレビュー: 別ウィンドウ / タブ、M4)
 //             viewport.float / viewport.state                                  (ビューポートを別ウィンドウにする、M4)
+//             asset.list / asset.read / asset.write / asset.templates / asset.create / asset.openExternal /
+//             shader.compile / shader.usages / shader.status                   (シェーダー / パイプラインの編集、M4)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
 //             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった) /
 //             project.changed (プロジェクトを開いた / 閉じた) / edit.changed (履歴の状態) /
 //             pipeline.changed (元に戻す / やり直すでパイプラインが変わった) /
 //             viewer.pixel (リソースビューアーのピクセルの値と状態) /
-//             preview.changed (プレビューの一覧) / viewport.changed (ビューポートが別ウィンドウか)
+//             preview.changed (プレビューの一覧) / viewport.changed (ビューポートが別ウィンドウか) /
+//             shader.status (シェーダーのコンパイルの成否が変わった)
 // ============================================================
 
 #include "host/WebHost.h"
@@ -34,6 +37,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -74,6 +78,10 @@ private:
 	void registerEditMethods();
 	void registerViewerMethods();
 	void registerWindowMethods();   // EditorWindows.cpp
+	void registerAssetMethods();    // EditorAssets.cpp
+	// シェーダーのコンパイルのメッセージ (描画スレッド)。shader.compile の最中なら集めて true (ログに出さない)
+	bool captureShaderMessage(int32_t id, const std::string& text);
+	void onShaderStatus(const std::string& enginePath, bool ok, const std::string& text);   // UI スレッド
 	// 書かれた項目だけを settings に入れる。値が不正なら false (error に理由)
 	static bool applyViewerPatch(const Json& patch, ResourceViewer::Settings& settings, std::string& error);
 	static Json viewerJson(const ResourceViewer::Settings& settings);
@@ -104,6 +112,7 @@ private:
 	void checkSmokeTest();   // UI スレッドから呼ぶ
 	void runInspectorSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 	void runGraphSelfCheck(std::function<void(bool ok, const std::string& error)> done);
+	void runShaderSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 
 	EditorOptions  m_options;
 	WebHost        m_host;       // 破棄の順: 描画スレッド → ビューポート → WebView
@@ -123,7 +132,7 @@ private:
 	bool     m_engineDone    = false;
 	bool     m_engineOk      = false;
 	uint64_t m_framesDrawn   = 0;
-	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, Windows, WaitAfter, Finished };
+	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, Windows, Shader, WaitAfter, Finished };
 	SmokeStage m_smokeStage    = SmokeStage::WaitProject;
 	bool       m_smokeProjectFailed = false;
 	std::filesystem::path m_smokeDir;   // スモークテストのプロジェクト (一時フォルダ。終了時に消す)
@@ -160,6 +169,7 @@ private:
 	uint32_t                        m_nextPreviewId = 1;
 	std::unique_ptr<FloatingWindow> m_viewportFrame;   // ビューポートを入れた別ウィンドウ (なければメインのウィンドウの中)
 	bool                            m_viewportBusy = false;
+	std::map<std::string, std::string> m_shaderErrors;   // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ。UI スレッド)
 	struct { int x = 0, y = 0, w = 0, h = 0; bool visible = false; } m_viewportWebRect;   // Web のパネルの矩形 (戻すときに使う)
 	int      m_exitCode      = 0;
 };

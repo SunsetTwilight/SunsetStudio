@@ -441,6 +441,8 @@ void RenderThread::openProject(std::filesystem::path assetRoot, std::string grap
 		}
 		m_shaders = std::make_unique<ShaderLibrary>(engine);
 		m_shaders->setOnReload([this](ShaderHandle, const std::string& path, bool ok) {
+			if (m_callbacks.shaderReloaded)
+				m_callbacks.shaderReloaded(path, ok);
 			if (m_callbacks.log)
 				m_callbacks.log(ok ? "info" : "warning",
 					ok ? "シェーダーを作り直しました: " + path : "シェーダーを作り直せませんでした (元のまま): " + path);

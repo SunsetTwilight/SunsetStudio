@@ -4,7 +4,8 @@
 //
 //  webview/webview の包み。UI スレッド (webview_run を呼ぶスレッド) で作り、そのスレッドで動かす。
 //    ・トップレベルのウィンドウは webview が作って持つ
-//    ・UI の読み込み: 配布時は 1 つにまとめた index.html、開発時は Vite の開発サーバー (localhost のみ)
+//    ・UI の読み込み: 配布時は 1 つにまとめた index.html を、ui フォルダを割り当てた仮想ホスト
+//      (https://ui.sunset-studio.example/) で開く。開発時は Vite の開発サーバー (localhost のみ)
 //    ・JS → C++: window.__studio_call(method, params) を Bridge に渡す
 //    ・C++ → JS: emit(name, payload) で window.__studio_event(name, payload) を呼ぶ
 //

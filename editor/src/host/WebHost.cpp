@@ -9,6 +9,9 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <ole2.h>   // WebView2.h が使う COM の宣言 (WIN32_LEAN_AND_MEAN では入らない)
+#include <WebView2.h>
+#include <wrl/client.h>
 
 #include <fstream>
 #include <iterator>
@@ -29,6 +32,25 @@ const char* k_InitScript = R"js(
 	window.__studio_take_pending = function () { return pending.splice(0, pending.length); };
 })();
 )js";
+
+// 配布用の UI を配る仮想ホスト (WebView2 の SetVirtualHostNameToFolderMapping)。
+// 実在しないドメイン (.example) にして、ネットワークの名前と重ならないようにする
+const wchar_t* k_UiHostW = L"ui.sunset-studio.example";
+const char*    k_UiUrl   = "https://ui.sunset-studio.example/index.html";
+
+// webview が作った WebView2 に、UI のフォルダを仮想ホストとして割り当てる
+bool mapUiFolder(webview_t w, const std::filesystem::path& folder, std::string& error)
+{
+	using Microsoft::WRL::ComPtr;
+	auto* controller = static_cast<ICoreWebView2Controller*>(webview_get_native_handle(w, WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER));
+	ComPtr<ICoreWebView2> core;
+	ComPtr<ICoreWebView2_3> core3;
+	if (!controller || FAILED(controller->get_CoreWebView2(&core)) || !core || FAILED(core.As(&core3)))
+		return error = "WebView2 の仮想ホストを使えません (WebView2 ランタイムが古い可能性があります)", false;
+	if (FAILED(core3->SetVirtualHostNameToFolderMapping(k_UiHostW, folder.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS)))
+		return error = "UI のフォルダを仮想ホストに割り当てられません: " + folder.string(), false;
+	return true;
+}
 
 bool isLocalDevUrl(const std::string& url)
 {
@@ -118,16 +140,32 @@ bool WebHost::loadUi(const std::filesystem::path& indexHtml, const std::string& 
 		return true;
 	}
 
-	std::ifstream in(indexHtml, std::ios::binary);
-	if (!in)
+	std::error_code ec;
+	if (!std::filesystem::is_regular_file(indexHtml, ec))
 	{
 		error = "UI のファイルが見つかりません: " + indexHtml.string();
 		webview_set_html(wv(m_webview), fallbackPage(error).c_str());
 		return false;
 	}
+	// UI のフォルダを https://ui.sunset-studio.example/ として配り、index.html を開く。
+	// (NavigateToString = webview_set_html は 2 MB までなので、Monaco を含む UI は渡せない)
+	std::string mapError;
+	if (mapUiFolder(wv(m_webview), indexHtml.parent_path(), mapError))
+	{
+		webview_navigate(wv(m_webview), k_UiUrl);
+		return true;
+	}
+	// 仮想ホストを使えない古いランタイム: 2 MB 以下なら文字列で渡す
+	std::ifstream in(indexHtml, std::ios::binary);
 	const std::string html((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-	webview_set_html(wv(m_webview), html.c_str());
-	return true;
+	if (html.size() < 2u * 1024u * 1024u)
+	{
+		webview_set_html(wv(m_webview), html.c_str());
+		return true;
+	}
+	error = mapError + " (WebView2 ランタイムを更新してください)";
+	webview_set_html(wv(m_webview), fallbackPage(error).c_str());
+	return false;
 }
 
 void WebHost::run()

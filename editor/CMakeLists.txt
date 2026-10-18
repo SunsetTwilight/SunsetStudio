@@ -31,6 +31,8 @@ add_library(studio_services STATIC
     src/services/Project.cpp
     src/services/UndoStack.h          # 編集の履歴 (Undo / Redo)
     src/services/UndoStack.cpp
+    src/services/AssetFiles.h         # アセットのファイル (パスの検証、一覧、テンプレート)
+    src/services/AssetFiles.cpp
 )
 target_include_directories(studio_services PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(studio_services
@@ -44,10 +46,13 @@ add_executable(SunsetEditor
     src/app/EditorApp.h
     src/app/EditorApp.cpp
     src/app/EditorWindows.cpp
+    src/app/EditorAssets.cpp
     src/host/WebHost.h
     src/host/WebHost.cpp
     src/host/FileDialog.h
     src/host/FileDialog_win32.cpp
+    src/host/ExternalOpen.h
+    src/host/ExternalOpen_win32.cpp
     src/render/RenderThread.h
     src/render/RenderThread.cpp
     src/render/OrbitCamera.h

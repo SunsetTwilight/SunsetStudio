@@ -138,11 +138,12 @@ WebView の上に、ネイティブの描画を合成することはできない
 
 | モード | 読み込み方 | 用途 |
 |-------|-----------|------|
-| 配布 / 通常の実行 | Vite でビルドした成果物を **1 つの HTML にまとめ** (vite-plugin-singlefile)、`bin/ui/index.html` に置く。起動時に読み込んで `webview_set_html` で表示する | 全 OS で同じ方法で動く。ローカルのファイルを `file://` で開く方法は、モジュールのスクリプトの制限で OS ごとの差が大きいため使わない |
+| 配布 / 通常の実行 | Vite でビルドした成果物を **1 つの HTML にまとめ** (vite-plugin-singlefile)、`bin/ui/index.html` に置く。Windows では `bin/ui` フォルダを WebView2 の仮想ホスト (`SetVirtualHostNameToFolderMapping`、`https://ui.sunset-studio.example/`) に割り当てて `index.html` を開く (2026-10-18 から。それまでは `webview_set_html`) | ローカルのファイルを `file://` で開く方法は、モジュールのスクリプトの制限で OS ごとの差が大きいため使わない。`webview_set_html` (NavigateToString) は 2 MB までで、Monaco を含む UI (約 6 MB) を渡せないため、仮想ホストに移した。仮想ホストを使えない古いランタイムでは、2 MB 以下なら `webview_set_html` に戻る |
 | 開発 | 環境変数 `STUDIO_UI_DEV_URL` (例 `http://localhost:5173`) があれば、`webview_navigate` で Vite の開発サーバーを開く | UI をホットリロードしながら作る |
 
 - 外部のサイトには遷移させない。開発用の URL は `localhost` だけを許可する。
-- 1 つの HTML にまとめる方式で、大きさや読み込み時間が問題になった場合は、OS ごとのカスタムスキーマ (WebView2 の仮想ホストのマッピング、WKURLSchemeHandler、WebKitGTK の URI スキーム) に移行する。
+- Windows は仮想ホストに移した (上)。macOS / Linux では、WKURLSchemeHandler / WebKitGTK の URI スキームで同じことをする。
+- UI は Monaco を含めて約 6 MB。読み込み時間 (DOMContentLoaded) は Release で約 0.9 秒 (Monaco を入れる前は約 0.6 秒)。重くなったら、1 ファイルをやめて Monaco をシェーダーのタブを開いたときだけ読む形に移す (仮想ホストなので複数のファイルを配れる)。
 
 ---
 
@@ -191,7 +192,7 @@ tests/
 | TypeScript / Vite / vite-plugin-singlefile | ビルド | Apache-2.0 / MIT / MIT | 同上 (開発時のみ) |
 | dockview | ドッキングできるパネルのレイアウト | MIT | 同上 |
 | @xyflow/react (React Flow) 12.11.6 | レンダーグラフのノードエディター (M4) | MIT | 同上 |
-| Monaco Editor (予定) | シェーダー (HLSL) とパイプラインの JSON をタブで編集する (M4、2026-10-18 決定) | MIT | 同上 (UI にまとめる。数 MB 増える) |
+| Monaco Editor 0.57.0 | シェーダー (HLSL) とパイプラインの JSON をタブで編集する (M4) | MIT | 同上。入口は `src/editor/monacoEntry.ts` (`tools/gen-monaco-entry.mjs` で editor.main.js から作る。言語の定義、TypeScript / CSS / HTML の言語機能、LSP は外し、JSON は残す)。ワーカーは `?worker&inline` で UI に埋め込む |
 | @dagrejs/dagre 3.1.1 | ノードの自動配置 (左 → 右に並べる) | MIT | 同上 |
 | Vitest 5.0.3 | UI の単体テスト (ノードエディターのモデル) | MIT | 同上 (開発時のみ) |
 | ufbx (予定) | FBX の読み込み (Maya。M5) | MIT | 置き場所は着手時に決める (Studio、または SunsetAssets) |
@@ -401,7 +402,7 @@ MyGame/
 | プレビュー | ネイティブのトップレベルのウィンドウ (`FloatingWindow`。メインのウィンドウを owner にする) に、それぞれスワップチェーンを作る。グラフは 1 フレームに 1 回だけ記録し、そのあとでウィンドウごとに `ResourceViewer::draw` (表示だけ。設定と SRV はウィンドウごと) で描いて Present する (vsync はビューポートだけ)。同じリソースを開き直すと前に出す。表示できない理由はタイトルに出す。メソッド `preview.open / set / close / list`、イベント `preview.changed` |
 | ビューポートの切り離し | ビューポートの子ウィンドウを、別ウィンドウ (`FloatingWindow`) へ `SetParent` で移す。移す前にビューポートを隠して、スワップチェーンを解放する (`RenderThread::resetViewport`)。別ウィンドウのあいだ、Web のパネルには「ここに戻す」を出し、C++ は Web の矩形を覚えるだけにする (戻すときに使う)。別ウィンドウを閉じると戻る。メソッド `viewport.float / state`、イベント `viewport.changed` |
 | 見えないとき | ビューポートが見えない (タブの裏、最小化) がプレビューはあるときは、グラフをオフスクリーンの `$backbuffer` (最後のビューポートの大きさ) に描く |
-| Web のパネル | タブ (またはグループ) をドラッグして、ウィンドウの外で離すと、dockview の popout (WebView2 の `window.open`) で別ウィンドウにする (`state/dock.ts`)。配布時の UI は `about:blank` (`webview_set_html`) なので、同じ `about:blank` を開く (開発サーバーでは `public/popout.html`)。`about:blank` は `window.open` の中で読み込みが終わり `load` が来ないことがあるので、来ていなければ送る。ビューポートのタブを外へ出したときは、ネイティブの切り離しにする |
+| Web のパネル | タブ (またはグループ) をドラッグして、ウィンドウの外で離すと、dockview の popout (WebView2 の `window.open`) で別ウィンドウにする (`state/dock.ts`)。popout の窓は `public/popout.html` を開く (配布時は仮想ホスト、開発時は開発サーバーで、どちらも同じオリジン。2026-10-18 までは `webview_set_html` だったので `about:blank` を開いていた)。`about:blank` は `window.open` の中で読み込みが終わり `load` が来ないことがあるので、来ていなければ送る。ビューポートのタブを外へ出したときは、ネイティブの切り離しにする |
 | 終了 | 別ウィンドウはメインのウィンドウと一緒に壊れるので、閉じる前にプレビューのスワップチェーンとビューポートの別ウィンドウを片付ける。プロジェクトを閉じる / 開くときは、プレビューを閉じ、ビューポートを戻す |
 | テスト | スモークテストに、gbAlbedo のプレビュー (別ウィンドウ) と depth のプレビュー (タブ。決まった矩形) を開いて表示できたこと、ビューポートを別ウィンドウにして描けること、戻せることを加えた (終了コード 10)。手元では CDP で、パスの右クリックのメニュー、別ウィンドウ / ビューポートへの表示、同じリソースの開き直し、ログのタブを外へドラッグしての popout (中身が別ウィンドウに移る)、ビューポートの切り離しと戻し、タブのプレビュー (2 つを同じグループに並べる、前に出し直す、外へドラッグして別ウィンドウ、閉じる) を確認した (D3D12 のメッセージ 0 件) |
 | 未対応 | popout の窓には WebView2 のアドレス (about:blank) の帯が出る (`NewWindowRequested` で自前の窓にすれば消せる)。プレビューの窓では、まだチャンネルなどを変えられない (`preview.set` はある)。プレビューで最終出力 (`$backbuffer`) は表示できない |
@@ -410,6 +411,7 @@ MyGame/
 
 オリジナルのシェーダーを書くために、パスのノードからパイプラインとシェーダーを開き、作り、コンパイルできるようにする。
 編集の場所は **A + B** (ユーザーの決定): エディターの中のコードエディター (Monaco) で編集でき、外部のエディター (VS Code など) でも開ける。
+Monaco は UI の 1 ファイルに含め、HLSL の色分けは Monarch で自作する (ユーザーの決定)。実装状況は下の節。
 
 | 項目 | 内容 |
 |------|------|
@@ -417,7 +419,20 @@ MyGame/
 | シェーダーのタブ | dockview のタブで Monaco に HLSL を表示する。Ctrl+S で保存 → ホットリロード (ShaderLibrary) でコンパイルして反映。エラーはその行に印を付け、下にメッセージを出す。失敗しているあいだは前のシェーダーのまま描く。「外部で開く」で OS の既定 / VS Code を起動する (外部で保存しても同じ経路で反映) |
 | パイプラインのタブ | 今のインスペクターのフォームを広げ、VS / PS のファイルを開く・差し替える欄と、シェーダーのリフレクション (どの名前がどのスロットか) を加える |
 | 新しく作る | テンプレート (全画面の PS、Compute など) から shaders/ と pipelines/ に作り、パスにつなぐ (元に戻すの対象) |
-| 未決 | Monaco の読み込み方 (UI に同梱、ワーカーの扱い)、HLSL の色分けの定義 |
+| ~~未決~~ | Monaco は 1 ファイルの UI に含め、ワーカーは Blob で埋め込む。HLSL の色分けは Monarch の自作 (どちらも 2026-10-18 決定) |
+
+### M4 パイプライン / シェーダーの編集の実装状況 (完了)
+
+| 項目 | 内容 |
+|------|------|
+| 入口 | パスのノードの右クリック: パイプラインを開く、VS / PS / CS を開く (エラーがあれば印)、新しいシェーダーを作る。ノードには PS (Compute なら CS) のファイル名と、コンパイルに失敗しているシェーダーの数 (「エラー n」) を出す。右クリックのメニューはパネルの中に収まるようにずらす |
+| ファイルのタブ | `panels/AssetPanel.tsx` (id `asset:<パス>`)。Monaco (`editor/CodeEditor.tsx`、自作の部品。`@monaco-editor/react` は CDN を読むので使わない) で `.hlsl` / `.json` を編集する。Ctrl+S / 「保存してコンパイル」で `asset.write` (原子的に置き換え) → 描画スレッドのホットリロードが反映。シェーダーは保存した内容を `shader.compile` で確かめ、エラー / 警告をその行に印 (マーカー) と、下の一覧 (クリックでその行へ) に出す。「コンパイルだけ」は保存せずに確かめる。保存していない変更はタイトルに ●。外部で保存された変更は 2 秒ごとに確かめて読み直す (こちらにも変更があれば知らせる)。「VS Code」(`code -g`) / 「既定のアプリ」(ShellExecute) で外部で開く。文字入力は textarea 方式 (`editContext: false`。IME の実績のため) |
+| HLSL の色分け | `editor/hlsl.ts` の Monarch: キーワード、型 (スカラー / ベクトル / 行列 / テクスチャ / バッファ)、組み込み関数、セマンティクス (`SV_Target` など)、`register(t0)`、属性 (`[numthreads]`)、プリプロセッサー、コメント。テーマ `sunset-dark` |
+| パイプラインのタブ | `panels/PipelinePanel.tsx` (id `pipeline:<パス>`)。ステージごとにシェーダーのファイル (開く / 差し替える / 新しく作って差し替える)、リフレクション (リソースとレジスター、定数バッファと大きさ、入力 / 出力のセマンティクス、numthreads)、コンパイルのエラー。ステート (ブレンドなど) は「ステートを編集」でインスペクターのフォームを開く (フォームは 1 か所にする)。「JSON を開く」でファイルのタブ |
+| 新しく作る | `NewShaderDialog`: テンプレート (全画面の PS / メッシュの VS・PS / Compute。パイプラインは全画面 / Compute) から作る (`asset.create`。同じ名前があればエラー)。ノードから作ると、パイプラインを `pipelines/<名前>.json` に複製してステージを差し替え、パスのパイプラインにする (グラフの変更なので元に戻せる)。パイプラインのタブから作ると、そのパイプラインのステージを差し替える |
+| C++ | `app/EditorAssets.cpp`: `asset.list / read / write / templates / create / openExternal`、`shader.compile` (描画スレッドでコンパイルだけして、メッセージ (DXC のテキスト) とリフレクション (スキーマの JSON) を返す。メッセージはログに出さない)、`shader.usages`、`shader.status` とイベント `shader.status` (ホットリロード / 読み込みでのコンパイルの失敗と回復。エンジンのメッセージ (id = -2) から、ファイルのパスを取り出す)。`services/AssetFiles` (アセットのパスの検証: フォルダの外、絶対パス、`..` を受け付けない、一覧、ステージの推測、テンプレート)。`host/ExternalOpen_win32.cpp` |
+| テスト | `test_asset_files.cpp` (doctest: パスの検証、一覧、テンプレート)、`editor/hlsl.test.ts` (Vitest: DXC のメッセージの読み取り、色分けの定義)。スモークテストに `shader.compile` (正しい内容のリフレクション、壊した内容のエラーと行)、テンプレートからの作成とコンパイルを加えた (終了コード 11)。手元では CDP で、右クリック → PS を開く、色分け、エラーを入れて Ctrl+S (印、一覧、ノードの「エラー 1」、描画が続く)、戻して保存 (印が消える)、新しいシェーダーを作ってつなぐ → 元に戻す、パイプラインのタブのリフレクション、タブを外へ出しても Monaco が描けることを確認した (D3D12 のメッセージ 0 件、コンソールのエラー 0 件) |
+| 未対応 | ファイルの保存は元に戻す / やり直すの履歴に入らない (Monaco の中の取り消しと、ファイルの差し替えはやり直す)。保存していない変更があるタブを閉じても確認しない。外部で開く操作は手元で起動まで試していない (エラーの経路のみ)。include したファイル (common.hlsli) を変えたときの、使っている側のエラーの表示は、ホットリロードのイベントで届いた分だけ |
 
 ## M5: シーン、マテリアル、ライト (計画、2026-10-18 決定)
 
@@ -531,5 +546,5 @@ MyWork/
 - **フォーカスとショートカット**: WebView と子ウィンドウの間で、キーボードのフォーカスとショートカットの扱いを調整する必要がある。
 - **DPI**: CSS px と物理ピクセルの変換。モニターをまたいでウィンドウを移動したときの再計算。
 - **WebView2 ランタイムがない環境**: `webview_create` が `WEBVIEW_ERROR_MISSING_DEPENDENCY` を返したら、インストールを案内して終了する。
-- **Web の成果物の大きさ**: 1 つの HTML にまとめる方式が重くなった場合の、カスタムスキーマへの移行。
+- **Web の成果物の大きさ**: Windows は仮想ホストに移した (Monaco を含めて約 6 MB、読み込み約 0.9 秒)。さらに重くなったら、Monaco を必要なときだけ読む形にする。
 - **将来の切り出し候補**: `WebHost` と `Bridge` は、ほかのツールでも使える汎用の仕組みになりそうなので、育ってきたら独立したライブラリ (例: SunsetWebHost) に切り出すことを検討する。

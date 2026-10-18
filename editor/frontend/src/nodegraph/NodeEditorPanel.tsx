@@ -7,10 +7,12 @@
 //           Delete で線 / ノードを消す、右クリックでパス / リソースを加える、クリックでインスペクターに表示
 //    結果   ノードを右クリック → そのノードの結果 (リソースならそれ自身、パスなら出力 / 入力のテクスチャ) だけを
 //           ビューポートに表示する (リソースビューアー)、タブに表示する、または別ウィンドウに表示する (preview.open)
+//    シェーダー パスを右クリック → パイプラインを開く、VS / PS / CS を開く (Monaco のタブ)、
+//           新しいシェーダーを作る (パイプラインを複製し、新しいシェーダーに差し替えて、パスにつなぐ)
 //    操作   自動配置 (dagre)、全体を表示
 //  編集はすべてグラフ全体の JSON を graph.set で送る (コンパイルできなければエラーで前のまま、元に戻す / やり直すが効く)。
 // ============================================================
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
@@ -28,7 +30,10 @@ import '@xyflow/react/dist/style.css';
 import { isConnected } from '../bridge/client';
 import type { GraphInfo, JsonObject } from '../bridge/protocol';
 import { setViewer, showInViewer, openPreview } from '../panels/ViewerPanel';
-import { openPreviewTab, showPanel } from '../state/dock';
+import { openAssetTab, openPipelineTab, openPreviewTab, showPanel } from '../state/dock';
+import { call } from '../bridge/client';
+import { fileName, loadPipelineShaders, shaderErrorsOf, withShaderFile, type Stage } from '../state/assets';
+import { NewShaderDialog } from '../panels/NewShaderDialog';
 import { applyGraph } from '../state/graph';
 import { studioStore, useStudio } from '../state/store';
 import {
@@ -98,6 +103,9 @@ function NodeEditor() {
   // ノードの右クリックのメニュー (screen は別ウィンドウを出す場所)
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; screen: { x: number; y: number } } | null>(null);
   const viewer = useStudio((s) => s.viewer);
+  const pipelineShaders = useStudio((s) => s.pipelineShaders);
+  const shaderErrors = useStudio((s) => s.shaderErrors);
+  const [newShader, setNewShader] = useState<{ pass: string; pipeline: string; stage: Stage } | null>(null);
   const wrapper = useRef<HTMLDivElement>(null);
   const fitted = useRef(false);
 
@@ -122,6 +130,17 @@ function NodeEditor() {
   useEffect(() => {
     if (!graph || !model) return;
     const rt = runtimeOf(graph, gpu);
+    // パイプラインのシェーダー (PS / CS) とコンパイルのエラー
+    for (const n of model.nodes) {
+      if (n.data.kind !== 'pass' || !n.data.pipeline) continue;
+      const s = pipelineShaders[n.data.pipeline];
+      if (!s) continue;
+      let r = rt.get(n.id);
+      if (!r) rt.set(n.id, (r = { errors: [], warnings: [] }));
+      const main = s.ps ?? s.cs;
+      if (main) r.shader = fileName(main);
+      r.shaderErrors = shaderErrorsOf(n.data.pipeline, pipelineShaders, shaderErrors).map(fileName);
+    }
     const selectedId = selection?.kind === 'pass' ? `pass:${selection.name}` : selection?.kind === 'resource' ? `res:${selection.name}` : '';
     setNodes(
       model.nodes.map((n) => ({
@@ -133,7 +152,7 @@ function NodeEditor() {
         width: n.width,
       })),
     );
-  }, [graph, model, positions, gpu, selection]);
+  }, [graph, model, positions, gpu, selection, pipelineShaders, shaderErrors]);
 
   useEffect(() => {
     if (!fitted.current && nodes.length > 0) {
@@ -217,11 +236,14 @@ function NodeEditor() {
     void apply(withPositions(graph.graph, autoLayout(model)), '自動配置').then(() => requestAnimationFrame(() => flow.fitView({ padding: 0.15 })));
   }, [graph, model, apply, flow]);
 
+  // メニューの位置の基準 (メニューはキャンバスの中に置く)
+  const canvasRect = () => (wrapper.current?.querySelector('.node-editor-canvas') ?? wrapper.current)?.getBoundingClientRect();
+
   // ---- 追加 (右クリックのメニュー、ヘッダーのボタン) ----
   const onPaneContextMenu = useCallback(
     (e: MouseEvent | React.MouseEvent) => {
       e.preventDefault();
-      const rect = wrapper.current?.getBoundingClientRect();
+      const rect = canvasRect();
       const p = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       setMenu({ x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0), at: [p.x, p.y] });
     },
@@ -231,7 +253,7 @@ function NodeEditor() {
   // ---- ノードの結果を表示する (右クリックのメニュー) ----
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
     e.preventDefault();
-    const rect = wrapper.current?.getBoundingClientRect();
+    const rect = canvasRect();
     setMenu(null);
     setNodeMenu({ x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0), nodeId: node.id, screen: { x: e.screenX, y: e.screenY } });
     const n = parseNodeId(node.id);
@@ -255,10 +277,24 @@ function NodeEditor() {
     openPreviewTab(t.resource, t.format);
     setStatus({ kind: 'ok', text: `${t.resource} をタブに表示` });
   };
+  // 新しいシェーダーを作ってパスにつなぐ: パイプラインを複製し、ステージを新しいシェーダーに差し替えて、パスのパイプラインにする
+  const connectNewShader = async (pass: string, pipeline: string, stage: Stage, shaderPath: string) => {
+    if (!graph) return;
+    const base = shaderPath.slice(shaderPath.lastIndexOf('/') + 1).replace(/\.(vs|ps|cs)\.hlsl$/i, '').replace(/\.hlsl$/i, '');
+    const newPipeline = `pipelines/${base}.json`;
+    const src = (await call('asset.read', { path: pipeline })).text;
+    await call('asset.write', { path: newPipeline, text: withShaderFile(src, stage, shaderPath), create: true });
+    const next = JSON.parse(JSON.stringify(graph.graph)) as JsonObject;
+    for (const p of (next.passes as JsonObject[]) ?? []) if (p.name === pass) p.pipeline = newPipeline;
+    await apply(next, `${pass} を新しいシェーダー ${fileName(shaderPath)} に`);
+    void loadPipelineShaders([...graph.pipelines, newPipeline]);
+    openAssetTab(shaderPath);
+  };
+
   const ROLE_LABEL: Record<PreviewTarget['role'], string> = { resource: '', output: '出力', input: '入力' };
 
   const centerOfView = (): XY => {
-    const rect = wrapper.current?.getBoundingClientRect();
+    const rect = canvasRect();
     const p = flow.screenToFlowPosition({ x: (rect?.left ?? 0) + (rect?.width ?? 400) / 2, y: (rect?.top ?? 0) + (rect?.height ?? 300) / 2 });
     return [p.x - 100, p.y - 40];
   };
@@ -326,8 +362,18 @@ function NodeEditor() {
           <Background gap={20} size={1} />
           <Controls showInteractive={false} />
         </ReactFlow>
+        {newShader && (
+          <NewShaderDialog
+            stage={newShader.stage}
+            defaultName={`${newShader.pass.toLowerCase()}_custom`}
+            title={`${newShader.pass} の新しいシェーダー`}
+            note={`${fileName(newShader.pipeline)} を複製して新しいシェーダーに差し替え、${newShader.pass} につなぎます (つなぎ替えは元に戻せます)`}
+            onCreated={(path) => connectNewShader(newShader.pass, newShader.pipeline, newShader.stage, path)}
+            onClose={() => setNewShader(null)}
+          />
+        )}
         {menu && (
-          <div className="rf-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+          <FloatingMenu className="rf-menu" x={menu.x} y={menu.y}>
             <div className="rf-menu-title">パスを追加</div>
             <button onClick={() => doAddPass('Raster', menu.at)}>Raster (全画面)</button>
             <button onClick={() => doAddPass('Compute', menu.at)}>Compute</button>
@@ -335,10 +381,10 @@ function NodeEditor() {
             <div className="rf-menu-title">リソースを追加</div>
             <button onClick={() => doAddResource('texture', menu.at)}>テクスチャ</button>
             <button onClick={() => doAddResource('buffer', menu.at)}>バッファ</button>
-          </div>
+          </FloatingMenu>
         )}
         {nodeMenu && (
-          <div className="rf-menu rf-node-menu" style={{ left: nodeMenu.x, top: nodeMenu.y }} onClick={(e) => e.stopPropagation()}>
+          <FloatingMenu className="rf-menu rf-node-menu" x={nodeMenu.x} y={nodeMenu.y}>
             <div className="rf-menu-title">{nodeMenu.nodeId.replace(/^\w+:/, '')} の結果を表示</div>
             {(() => {
               const targets = previewTargets(graph.graph, nodeMenu.nodeId);
@@ -361,6 +407,44 @@ function NodeEditor() {
                 </div>
               ));
             })()}
+            {(() => {
+              const n = parseNodeId(nodeMenu.nodeId);
+              const pass = n?.kind === 'pass' ? ((graph.graph.passes as JsonObject[]) ?? []).find((p) => p.name === n.name) : undefined;
+              if (!pass) return null;
+              const pipeline = String(pass.pipeline ?? '');
+              const s = pipeline ? pipelineShaders[pipeline] : undefined;
+              const stage: Stage = pass.type === 'Compute' ? 'cs' : 'ps';
+              return (
+                <>
+                  <div className="rf-menu-title">パイプライン / シェーダー</div>
+                  {!pipeline && <div className="rf-menu-note">このパスはパイプラインを使いません</div>}
+                  {pipeline && (
+                    <button onClick={() => { setNodeMenu(null); openPipelineTab(pipeline); }}>
+                      パイプラインを開く ({fileName(pipeline)})
+                    </button>
+                  )}
+                  {s &&
+                    (['vs', 'ps', 'cs'] as const)
+                      .filter((st) => s[st])
+                      .map((st) => (
+                        <button key={st} onClick={() => { setNodeMenu(null); openAssetTab(s[st]!); }}>
+                          {st.toUpperCase()} を開く ({fileName(s[st]!)}){shaderErrors[s[st]!] ? ' · エラー' : ''}
+                        </button>
+                      ))}
+                  {pipeline && (
+                    <button
+                      onClick={() => {
+                        setNodeMenu(null);
+                        setNewShader({ pass: String(pass.name), pipeline, stage });
+                      }}
+                      title="テンプレートから新しいシェーダーを作り、パイプラインを複製して差し替え、このパスにつなぐ"
+                    >
+                      新しいシェーダーを作る…
+                    </button>
+                  )}
+                </>
+              );
+            })()}
             {viewer?.enabled && (
               <button
                 className="rf-menu-reset"
@@ -372,9 +456,28 @@ function NodeEditor() {
                 ビューポートを最終出力に戻す
               </button>
             )}
-          </div>
+          </FloatingMenu>
         )}
       </div>
+    </div>
+  );
+}
+
+// 右クリックのメニュー。パネルの外にはみ出すなら、内側へずらす (下にはみ出せば上へ、右にはみ出せば左へ)
+function FloatingMenu({ x, y, className, children }: { x: number; y: number; className: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const parent = el?.offsetParent as HTMLElement | null;
+    if (!el || !parent) return setPos({ left: x, top: y });
+    const maxLeft = parent.clientWidth - el.offsetWidth - 4;
+    const maxTop = parent.clientHeight - el.offsetHeight - 4;
+    setPos({ left: Math.max(4, Math.min(x, maxLeft)), top: Math.max(4, Math.min(y, maxTop)) });
+  }, [x, y]);
+  return (
+    <div ref={ref} className={className} style={pos} onClick={(e) => e.stopPropagation()}>
+      {children}
     </div>
   );
 }

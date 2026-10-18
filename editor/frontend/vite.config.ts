@@ -3,7 +3,8 @@
 //    npm run dev   : 開発サーバー (http://localhost:5173)。
 //                    SunsetEditor を STUDIO_UI_DEV_URL=http://localhost:5173 で起動するとホットリロードできる
 //    npm run build : 1 つの index.html にまとめる (vite-plugin-singlefile)。
-//                    SunsetEditor は webview_set_html でこれを読み込む (file:// を使わないので OS による差がない)
+//                    SunsetEditor は ui フォルダを WebView2 の仮想ホスト (https://ui.sunset-studio.example/) に割り当てて開く
+//                    (file:// を使わないので OS による差がない。webview_set_html は 2 MB までで、Monaco を含む UI は渡せない)
 // ============================================================
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';

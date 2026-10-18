@@ -175,6 +175,46 @@ export interface EditState {
 }
 
 // ---- リソースビューアー ----
+// シェーダー / パイプラインの編集 (asset.* / shader.*)
+export interface AssetTemplate {
+  id: string;
+  kind: 'shader' | 'pipeline';
+  label: string;
+  folder: string;
+  suffix: string;
+  stage: '' | 'vs' | 'ps' | 'cs';
+  description: string;
+}
+export interface ShaderReflection {
+  shaderModel: number;
+  threadGroupSize: [number, number, number];
+  instructionCount: number;
+  truncated: boolean;
+  bindings: JsonObject[]; // GfxShaderBinding (name, type, dimension, bindPoint, bindCount, space …)
+  cbuffers: JsonObject[];
+  variables: JsonObject[];
+  inputs: JsonObject[]; // GfxShaderSignatureParam
+  outputs: JsonObject[];
+}
+export interface ShaderCompileResult {
+  path: string;
+  stage: 'vs' | 'ps' | 'cs';
+  ok: boolean;
+  messages: string; // DXC のメッセージ (そのまま)
+  reflection?: ShaderReflection;
+}
+export interface ShaderUsage {
+  pipeline: string;
+  stage: 'vs' | 'ps' | 'cs';
+  entry: string;
+  profile: string;
+}
+export interface ShaderStatus {
+  path: string;
+  ok: boolean;
+  text: string;
+}
+
 // 別ウィンドウのプレビュー (preview.*)
 export interface PreviewInfo {
   id: number;
@@ -245,6 +285,18 @@ export interface Methods {
   'preview.set': { params: Partial<ViewerSettings> & { id: number }; result: ViewerSettings };
   'preview.close': { params: { id: number }; result: { previews: PreviewInfo[] } };
   'preview.list': { params: Record<string, never>; result: { previews: PreviewInfo[] } };
+  'asset.list': { params: { dir: string; extensions?: string[] }; result: { files: string[] } };
+  'asset.read': { params: { path: string }; result: { path: string; text: string } };
+  'asset.write': { params: { path: string; text: string; create?: boolean }; result: { path: string } };
+  'asset.templates': { params: Record<string, never>; result: { templates: AssetTemplate[] } };
+  'asset.create': { params: { template: string; path: string; shader?: string }; result: { path: string; text: string } };
+  'asset.openExternal': { params: { path: string; app: 'default' | 'vscode'; line?: number }; result: { opened: boolean } };
+  'shader.compile': {
+    params: { path: string; text?: string; stage?: 'vs' | 'ps' | 'cs'; entry?: string; profile?: string };
+    result: ShaderCompileResult;
+  };
+  'shader.usages': { params: { path: string }; result: { usages: ShaderUsage[] } };
+  'shader.status': { params: Record<string, never>; result: { errors: ShaderStatus[] } };
 }
 
 // C++ → JS (studio.on)
@@ -259,4 +311,5 @@ export interface Events {
   'viewer.pixel': ViewerPixel;
   'preview.changed': { previews: PreviewInfo[] };
   'viewport.changed': { floating: boolean };
+  'shader.status': ShaderStatus;
 }
