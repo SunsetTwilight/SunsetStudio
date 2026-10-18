@@ -44,7 +44,7 @@ Json projectToJson(const ProjectDesc& d)
 		j["engine"] = d.engine;
 	if (d.legacyLayout())
 		j["assets"] = d.assets;   // version 2 はプロジェクトのフォルダが起点なので書かない
-	j["viewport"] = { { "graph", d.viewportGraph } };
+	j["viewport"] = { { "graph", d.viewportGraph }, { "scene", d.viewportScene } };
 	return j;
 }
 
@@ -84,6 +84,7 @@ bool projectFromJson(const Json& json, ProjectDesc& out, ProjectDiagnostics& dia
 			for (const auto& [k2, v2] : v.items())
 			{
 				if (k2 == "graph") str(v2, "viewport.graph", d.viewportGraph);
+				else if (k2 == "scene") str(v2, "viewport.scene", d.viewportScene);
 				else diag.warnings.push_back("viewport." + k2 + ": 知らないキーなので無視します");
 			}
 		}
@@ -104,6 +105,8 @@ bool projectFromJson(const Json& json, ProjectDesc& out, ProjectDiagnostics& dia
 		diag.errors.push_back("assets: プロジェクトファイルからの相対パスにしてください");
 	if (d.viewportGraph.empty())
 		diag.errors.push_back("viewport.graph: ビューポートのグラフが空です");
+	if (d.viewportScene.empty())
+		diag.errors.push_back("viewport.scene: シーンが空です");
 	if (diag.errors.size() != errorsBefore)
 		return false;
 	out = std::move(d);

@@ -152,6 +152,33 @@ export interface ProjectInfo {
   engine?: string;
   graph?: string;
   legacyLayout?: boolean; // 古い構成 (Assets/ の下)。project.migrate で直下に並べる構成に移せる
+  scene?: string; // ビューポートのシーン (アセットのパス)
+}
+
+// シーン (scene.*、M5-2)
+export interface SceneObjectJson {
+  id: string;
+  name: string;
+  model: string; // "builtin:cube"
+  parent: string | null;
+  position: [number, number, number];
+  rotation: [number, number, number]; // 度 (X → Y → Z の順に回す)
+  scale: [number, number, number];
+  visible: boolean;
+  color: [number, number, number, number]; // 仮 (M5-4 でマテリアルに)
+  layer: string; // 仮 (レンダーグラフの drawList の layer)
+}
+export interface SceneJson {
+  version: number;
+  objects: SceneObjectJson[];
+  editor?: JsonValue;
+}
+export interface SceneInfo {
+  file: string;
+  revision: number;
+  dirty: boolean;
+  scene: SceneJson;
+  error?: string; // 読めなかった理由 (編集 / 保存はできない)
 }
 
 export interface RecentProject {
@@ -266,6 +293,11 @@ export interface Methods {
   'project.create': { params: { location: string; name: string; template: string }; result: ProjectInfo };
   'project.close': { params: Record<string, never>; result: ProjectInfo };
   'project.migrate': { params: Record<string, never>; result: ProjectInfo };
+  'scene.get': { params: Record<string, never>; result: SceneInfo };
+  'scene.set': { params: { scene: SceneJson; label?: string }; result: { revision: number; dirty: boolean; warnings: string[] } };
+  'scene.save': { params: Record<string, never>; result: { revision: number; dirty: boolean } };
+  'scene.select': { params: { id: string }; result: { id: string } };
+  'scene.pickAt': { params: { x: number; y: number }; result: { id: string } };
   'project.layout.get': { params: Record<string, never>; result: { layout: JsonValue } };
   'project.layout.set': { params: { layout: JsonValue }; result: Record<string, never> };
   'dialog.openProject': { params: Record<string, never>; result: { file: string | null } };
@@ -314,4 +346,6 @@ export interface Events {
   'preview.changed': { previews: PreviewInfo[] };
   'viewport.changed': { floating: boolean };
   'shader.status': ShaderStatus;
+  'scene.changed': { revision: number; dirty: boolean };
+  'scene.picked': { id: string };
 }

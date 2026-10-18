@@ -12,6 +12,7 @@
 //             project.info / project.recent / project.templates / project.open / project.create / project.close /
 //             project.layout.get / project.layout.set / dialog.openProject / dialog.pickFolder   (プロジェクト、M4a)
 //             project.migrate (Assets/ の古い構成を、直下に並べる構成に移す、M5)
+//             scene.get / scene.set / scene.save / scene.select / scene.pickAt (シーンのファイル、M5-2)
 //             edit.undo / edit.redo / edit.state                               (編集の履歴、M4)
 //             viewer.get / viewer.set                                          (リソースビューアー、M4)
 //             preview.open / preview.set / preview.setRect / preview.close / preview.list
@@ -25,11 +26,13 @@
 //             pipeline.changed (元に戻す / やり直すでパイプラインが変わった) /
 //             viewer.pixel (リソースビューアーのピクセルの値と状態) /
 //             preview.changed (プレビューの一覧) / viewport.changed (ビューポートが別ウィンドウか) /
-//             shader.status (シェーダーのコンパイルの成否が変わった)
+//             shader.status (シェーダーのコンパイルの成否が変わった) /
+//             scene.changed (シーンの版と保存の状態) / scene.picked (ビューポートのクリックで選んだ物体)
 // ============================================================
 
 #include "host/WebHost.h"
 #include "services/Project.h"
+#include "services/Scene.h"
 #include "services/UndoStack.h"
 #include "render/RenderThread.h"
 #include "viewport/FloatingWindow.h"
@@ -80,6 +83,12 @@ private:
 	void registerViewerMethods();
 	void registerWindowMethods();   // EditorWindows.cpp
 	void registerAssetMethods();    // EditorAssets.cpp
+	void registerSceneMethods();    // EditorScene.cpp
+	Json sceneInfoJson() const;
+	void emitSceneChanged();
+	void pushSceneToRenderer();
+	void loadProjectScene();                         // プロジェクトを開いた / 閉じたとき (UI スレッド)
+	void applySceneFromUndo(const SceneDesc& scene);
 	// シェーダーのコンパイルのメッセージ (描画スレッド)。shader.compile の最中なら集めて true (ログに出さない)
 	bool captureShaderMessage(int32_t id, const std::string& text);
 	void onShaderStatus(const std::string& enginePath, bool ok, const std::string& text);   // UI スレッド
@@ -114,6 +123,7 @@ private:
 	void runInspectorSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 	void runGraphSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 	void runShaderSelfCheck(std::function<void(bool ok, const std::string& error)> done);
+	void runSceneSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 
 	EditorOptions  m_options;
 	WebHost        m_host;       // 破棄の順: 描画スレッド → ビューポート → WebView
@@ -170,7 +180,14 @@ private:
 	uint32_t                        m_nextPreviewId = 1;
 	std::unique_ptr<FloatingWindow> m_viewportFrame;   // ビューポートを入れた別ウィンドウ (なければメインのウィンドウの中)
 	bool                            m_viewportBusy = false;
-	std::map<std::string, std::string> m_shaderErrors;   // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ。UI スレッド)
+	std::map<std::string, std::string> m_shaderErrors;
+	// シーン (UI スレッドだけが触る。描画スレッドにはコピーを渡す)
+	SceneDesc   m_sceneData;
+	std::string m_sceneFile;
+	std::string m_sceneError;      // 読めなかった理由 (空でなければ編集 / 保存を断る)
+	std::string m_sceneSelection;
+	uint64_t    m_sceneRevision = 0;
+	bool        m_sceneDirty    = false;   // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ。UI スレッド)
 	struct { int x = 0, y = 0, w = 0, h = 0; bool visible = false; } m_viewportWebRect;   // Web のパネルの矩形 (戻すときに使う)
 	int      m_exitCode      = 0;
 };

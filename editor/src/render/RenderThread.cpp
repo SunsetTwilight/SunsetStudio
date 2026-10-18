@@ -358,6 +358,10 @@ void RenderThread::renderFrame(GraphicsEngine& engine)
 		target = m_window->getRenderTarget();
 		if (!m_viewport->cursor(cx, cy))
 			cx = cy = -1;
+		// クリックで物体を選ぶ (CPU で光線と箱を判定する)
+		int px = 0, py = 0;
+		if (m_viewport->takeClick(px, py) && m_callbacks.picked)
+			m_callbacks.picked(m_scene.pick(px, py, w, h, m_camera));
 	}
 	m_scene.render(engine, target, w, h, m_camera, cx, cy);
 

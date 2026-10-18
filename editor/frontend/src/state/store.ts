@@ -3,13 +3,14 @@
 //  パネルは dockview の中で別々に描かれるので、props ではなくここから読む (useStudio)。
 // ============================================================
 import { useSyncExternalStore } from 'react';
-import type { AppInfo, EditState, EngineInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, ViewerPixel, ViewerSettings } from '../bridge/protocol';
+import type { AppInfo, EditState, EngineInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, SceneInfo, ViewerPixel, ViewerSettings } from '../bridge/protocol';
 
 // インスペクターに表示するもの (グラフのパネルで選ぶ)
 export type Selection =
   | { kind: 'pass'; name: string }
   | { kind: 'resource'; name: string }
-  | { kind: 'pipeline'; id: string };
+  | { kind: 'pipeline'; id: string }
+  | { kind: 'object'; id: string }; // シーンの物体 (M5-2)
 
 export interface StudioState {
   info: AppInfo | null;
@@ -27,6 +28,7 @@ export interface StudioState {
   viewportFloating: boolean; // ビューポートを別ウィンドウにしている
   shaderErrors: Record<string, string>; // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ)
   pipelineShaders: Record<string, PipelineShaders>; // パイプラインのアセット → シェーダーのファイル
+  scene: SceneInfo | null; // ビューポートのシーン (M5-2)
 }
 
 export interface PipelineShaders {
@@ -37,7 +39,7 @@ export interface PipelineShaders {
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, shaderErrors: {}, pipelineShaders: {} };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, shaderErrors: {}, pipelineShaders: {}, scene: null };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -76,12 +78,13 @@ export const studioStore = {
     set({ shaderErrors: next });
   },
   setPipelineShaders: (pipelineShaders: Record<string, PipelineShaders>) => set({ pipelineShaders }),
+  setScene: (scene: SceneInfo | null) => set({ scene }),
   // プロジェクトが変わったら、前のプロジェクトのグラフと選択と統計は捨てる
   setProject: (project: ProjectInfo) =>
     set(
       state.project?.file === project.file && state.project?.open === project.open
         ? { project }
-        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {} },
+        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {}, scene: null },
     ),
 };
 

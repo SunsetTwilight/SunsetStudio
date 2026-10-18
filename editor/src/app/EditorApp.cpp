@@ -231,6 +231,7 @@ int EditorApp::run()
 	registerViewerMethods();
 	registerWindowMethods();
 	registerAssetMethods();
+	registerSceneMethods();
 	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
@@ -261,6 +262,13 @@ int EditorApp::run()
 			m_viewerPixel = j;
 		}
 		m_host.emit("viewer.pixel", j);
+	};
+	callbacks.picked = [this](const std::string& id) {
+		m_host.post([this, id] {
+			m_sceneSelection = id;
+			m_render.postScene([id](GraphicsEngine&, ViewportRenderer* scene) { if (scene) scene->setSelection(id); });
+			m_host.emit("scene.picked", { { "id", id } });
+		});
 	};
 	callbacks.shaderReloaded = [this](const std::string& path, bool ok) {
 		if (ok)
@@ -853,12 +861,48 @@ void EditorApp::runShaderSelfCheck(std::function<void(bool ok, const std::string
 										if (s6 != 0 || !r6.value("ok", false))
 											return done(false, "テンプレートのシェーダーがコンパイルできない: " + r6.dump().substr(0, 400));
 										log("info", "smoke", "asset.create: テンプレートのシェーダーとパイプラインを作った");
-										done(true, {});
+										m_host.post([this, done] { runSceneSelfCheck(done); });
 									});
 								});
 						});
 					});
 				});
+		});
+	});
+}
+
+// シーンの経路: 既定のシーン (49 個) が読めて、ビューポートの中央をクリックすると中央の立方体を選び、
+// scene.set で動かして edit.undo で戻せる
+void EditorApp::runSceneSelfCheck(std::function<void(bool ok, const std::string& error)> done)
+{
+	Bridge& b = m_host.bridge();
+	b.callLocal("scene.get", Json::object(), [this, done](int s1, const Json& r1) {
+		if (s1 != 0 || r1["scene"]["objects"].size() != 49)
+			return done(false, "scene.get: " + r1.dump().substr(0, 300));
+		const Json original = r1["scene"];
+		const int cx = static_cast<int>(m_viewport.width() / 2), cy = static_cast<int>(m_viewport.height() / 2);
+		m_host.bridge().callLocal("scene.pickAt", { { "x", cx }, { "y", cy } }, [this, done, original](int s2, const Json& r2) {
+			if (s2 != 0 || r2.value("id", std::string()) != "center")
+				return done(false, "scene.pickAt (中央): " + r2.dump());
+			Json moved = original;
+			moved["objects"][0]["position"] = { 0, 4.0, 0 };
+			m_host.post([this, done, moved] {
+				m_host.bridge().callLocal("scene.set", { { "scene", moved }, { "label", "Center を動かす" } }, [this, done](int s3, const Json& r3) {
+					if (s3 != 0 || !r3.value("dirty", false))
+						return done(false, "scene.set: " + r3.dump());
+					m_host.post([this, done] {
+						m_host.bridge().callLocal("edit.undo", Json::object(), [this, done](int s4, const Json& r4) {
+							m_host.post([this, done, s4, r4] {
+								if (s4 != 0 || r4.value("kind", std::string()) != "scene" || m_sceneData.objects.empty()
+								    || m_sceneData.objects[0].position[1] != 1.5f)
+									return done(false, "edit.undo (シーン): " + r4.dump());
+								log("info", "smoke", "scene: 49 個を読み、中央をクリックで選び、動かして元に戻した");
+								done(true, {});
+							});
+						});
+					});
+				});
+			});
 		});
 	});
 }
@@ -982,6 +1026,7 @@ Json EditorApp::projectJson() const
 		{ "engine",    m_project->desc.engine },
 		{ "graph",     m_project->desc.viewportGraph },
 		{ "legacyLayout", m_project->desc.legacyLayout() },
+		{ "scene",     m_project->desc.viewportScene },
 	};
 }
 
@@ -1018,6 +1063,7 @@ void EditorApp::openProject(const std::filesystem::path& file, std::function<voi
 				m_project = project;
 				m_undo.clear();
 				emitEditState();
+				loadProjectScene();
 				m_host.setTitle(project.desc.name + " - SunsetEditor");
 				log("info", "project", "プロジェクトを開きました: " + pathToUtf8(project.file));
 				const Json info = projectJson();
@@ -1151,6 +1197,7 @@ void EditorApp::registerProjectMethods()
 				m_project.reset();
 				m_undo.clear();
 				emitEditState();
+				loadProjectScene();
 				m_host.setTitle("SunsetEditor");
 				m_host.emit("project.changed", projectJson());
 				r.ok(projectJson());
@@ -1230,7 +1277,7 @@ void EditorApp::registerEditMethods()
 		const UndoStack::Entry entry = *top;
 		const Json target = undo ? entry.before : entry.after;
 		m_editBusy = true;
-		m_render.postScene([this, r, entry, target, undo](GraphicsEngine&, ViewportRenderer* scene) {
+		m_render.postScene([this, r, entry, target, undo](GraphicsEngine& engine, ViewportRenderer* scene) {
 			EditOutcome o;
 			if (!scene)
 				o.message = "ビューポートのシーンがありません";
@@ -1241,6 +1288,18 @@ void EditorApp::registerEditMethods()
 			}
 			else if (entry.kind == "pipeline")
 				o = applyPipelineEdit(*scene, entry.target, target);
+			else if (entry.kind == "scene")
+			{
+				SceneDesc desc;
+				SceneDiagnostics diag;
+				if (sceneFromJson(target, desc, diag))
+				{
+					scene->setScene(engine, desc);
+					o.ok = true;
+				}
+				else
+					o.message = "シーンを戻せません";
+			}
 			else
 				o.message = "知らない種類の編集です: " + entry.kind;
 			m_host.post([this, r, entry, undo, o] {
@@ -1255,6 +1314,13 @@ void EditorApp::registerEditMethods()
 				emitEditState();
 				if (entry.kind == "pipeline")
 					m_host.emit("pipeline.changed", { { "id", entry.target } });
+				if (entry.kind == "scene")
+				{
+					SceneDesc desc;
+					SceneDiagnostics diag;
+					if (sceneFromJson(undo ? entry.before : entry.after, desc, diag))
+						applySceneFromUndo(desc);
+				}
 				log("info", "edit", std::string(undo ? "元に戻しました: " : "やり直しました: ") + entry.label);
 				r.ok({ { "label", entry.label }, { "kind", entry.kind }, { "target", entry.target }, { "state", m_undo.state() } });
 			});

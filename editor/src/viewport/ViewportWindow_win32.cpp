@@ -6,6 +6,8 @@
 #include <windows.h>
 #include <windowsx.h>
 
+#include <cstdlib>
+
 namespace studio
 {
 namespace
@@ -134,12 +136,23 @@ intptr_t ViewportWindow::handleMessage(unsigned msg, uintptr_t wp, intptr_t lp, 
 		return MA_ACTIVATE;
 	case WM_LBUTTONDOWN:
 		beginDrag(Drag::Orbit, lp);
+		m_downX = GET_X_LPARAM(lp);
+		m_downY = GET_Y_LPARAM(lp);
+		m_moved = 0;
 		return 0;
 	case WM_MBUTTONDOWN:
 	case WM_RBUTTONDOWN:
 		beginDrag(Drag::Pan, lp);
 		return 0;
 	case WM_LBUTTONUP:
+		// ほとんど動かさずに離したらクリック (物体を選ぶ)
+		if (m_drag == Drag::Orbit && m_moved <= 4)
+		{
+			const int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+			if (x >= 0 && y >= 0)
+				m_click = (static_cast<int64_t>(x) << 32) | static_cast<int64_t>(y);
+		}
+		[[fallthrough]];
 	case WM_MBUTTONUP:
 	case WM_RBUTTONUP:
 		if (m_drag != Drag::None)
@@ -170,6 +183,7 @@ intptr_t ViewportWindow::handleMessage(unsigned msg, uintptr_t wp, intptr_t lp, 
 		if (m_drag == Drag::None)
 			return 0;
 		const float dx = static_cast<float>(x - m_lastX), dy = static_cast<float>(y - m_lastY);
+		m_moved += std::abs(x - m_lastX) + std::abs(y - m_lastY);
 		m_lastX = x;
 		m_lastY = y;
 		std::lock_guard lock(m_inputMutex);

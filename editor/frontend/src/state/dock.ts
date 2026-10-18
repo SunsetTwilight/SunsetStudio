@@ -28,6 +28,7 @@ export const PANEL_TITLES: Record<string, string> = {
   log: 'ログ',
   viewer: 'リソースビューアー',
   nodes: 'ノードエディター',
+  scene: 'シーン',
 };
 
 // パネルがなければ開く (保存した配置から閉じたパネルを戻す)
@@ -38,7 +39,9 @@ export function showPanel(id: string) {
     existing.api.setActive();
     return;
   }
-  const ref = dockApi.getPanel('nodes') ?? dockApi.getPanel('log') ?? dockApi.getPanel('viewport');
+  // シーンはレンダーグラフと同じ場所 (左)、ほかはノードエディターの場所
+  const ref =
+    (id === 'scene' ? dockApi.getPanel('graph') : undefined) ?? dockApi.getPanel('nodes') ?? dockApi.getPanel('log') ?? dockApi.getPanel('viewport');
   dockApi.addPanel({
     id,
     component: id,

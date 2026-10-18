@@ -7,7 +7,8 @@
 //
 //  構成 (version 2、M5 から。アセットの起点はプロジェクトのフォルダ):
 //    MyWork/
-//    ├── MyWork.sunsetproj      { "version": 2, "name": ..., "engine": ..., "viewport": { "graph": "graphs/viewport.json" } }
+//    ├── MyWork.sunsetproj      { "version": 2, "name": ..., "engine": ...,
+//    │                            "viewport": { "graph": "graphs/viewport.json", "scene": "scenes/main.scene.json" } }
 //    ├── scenes/ graphs/ materials/ lights/ pipelines/ shaders/   種類ごとのアセット
 //    ├── assets/                モデルとテクスチャ (中は自由に整理する)
 //    ├── Saved/                 エディターが作るもの (パネルの配置など。git で管理しない)
@@ -37,6 +38,7 @@ struct ProjectDesc
 	std::string engine;                                  // 作ったときのエンジンのバージョン ("0.3")
 	std::string assets        = ".";                     // アセットの起点 (プロジェクトファイルからの相対パス)。version 1 では "Assets"
 	std::string viewportGraph = "graphs/viewport.json";  // アセットの起点からの相対パス
+	std::string viewportScene = "scenes/main.scene.json"; // 同上 (M5-2。なければ既定のシーンを作る)
 
 	bool legacyLayout() const { return version < 2; }   // Assets/ の下に置く古い構成
 };

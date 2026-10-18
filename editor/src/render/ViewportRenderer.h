@@ -7,7 +7,7 @@
 //    Assets/pipelines/*.json       パイプライン (シェーダー、バインディングレイアウト、ステート)
 //    Assets/shaders/*.hlsl         シェーダー
 //  プロジェクトを開くたびに init し直す (M4a)。
-//  このクラスは、シーン (立方体と地面のグリッド) とフレームの定数を IDrawListProvider としてグラフに渡し、
+//  このクラスは、シーン (シーンのファイルの物体と地面のグリッド) とフレームの定数を IDrawListProvider としてグラフに渡し、
 //  アセットの変更 (ファイルの保存、インスペクターの編集) をその場で反映する。
 //
 //  描画スレッドだけが使う。
@@ -15,6 +15,8 @@
 
 #include "OrbitCamera.h"
 #include "ResourceViewer.h"
+#include "SelectionOutline.h"
+#include "services/Scene.h"
 
 #include "gfx/core/GraphicsEngine.h"
 #include "gfx/core/ShaderLibrary.h"
@@ -58,6 +60,13 @@ public:
 	                 const ResourceViewer::Settings& settings, ResourceViewer::ViewCache& cache, const OrbitCamera& camera,
 	                 std::string& status);
 
+	// シーンの物体を置き換える (M5-2。drawList の layer が同じ、見えている builtin:cube を描く)
+	void setScene(GraphicsEngine& engine, const SceneDesc& scene);
+	// 選んでいる物体 (空なら選んでいない)。render で辺の印を描く
+	void setSelection(const std::string& id) { m_selection = id; }
+	// ビューポートのピクセル (x, y) の下の物体の id (なければ空)
+	std::string pick(int x, int y, uint32_t width, uint32_t height, const OrbitCamera& camera) const;
+
 	ResourceViewer& viewer() { return m_viewer; }
 	bool            viewerOk() const { return m_viewerOk; }
 
@@ -82,6 +91,11 @@ private:
 	struct Object
 	{
 		BufferHandle cb;   // ワールド行列と色 (common.hlsli の Object)
+		std::string  id;
+		std::string  layer;
+		bool         visible = true;
+		bool         cube    = true;   // builtin:cube (ほかのモデルは M5-3 で)
+		Mat4         world;
 	};
 
 	std::filesystem::path                     m_root;
@@ -93,6 +107,10 @@ private:
 
 	ResourceViewer      m_viewer;
 	bool                m_viewerOk = false;
+	SelectionOutline    m_outline;
+	bool                m_outlineOk = false;
+	SceneDesc           m_sceneDesc;     // 選択の判定に使う
+	std::string         m_selection;
 	std::string         m_viewerError;
 	BufferHandle        m_vb, m_ib, m_frameCB;
 	std::vector<Object> m_objects;

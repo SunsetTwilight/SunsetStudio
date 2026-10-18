@@ -9,7 +9,8 @@
 //  スレッド: create / destroy / setRect は UI スレッド (ウィンドウを作ったスレッド) から呼ぶ。
 //            takeInput / size / visible はどのスレッドからでもよい (描画スレッドが毎フレーム読む)。
 //
-//  マウス: 左ドラッグ = 回転、中 / 右ドラッグ = 平行移動、ホイール = ズーム、F キー = 視点を戻す
+//  マウス: 左ドラッグ = 回転、中 / 右ドラッグ = 平行移動、ホイール = ズーム、F キー = 視点を戻す、
+//          左クリック (ほとんど動かさずに離す) = 物体を選ぶ
 // ============================================================
 
 #include <atomic>
@@ -55,6 +56,16 @@ public:
 
 	// 積もった入力を取り出して空にする (どのスレッドからでもよい)
 	CameraInput takeInput();
+	// 最後の左クリックの位置を取り出す (どのスレッドからでもよい)。なければ false
+	bool takeClick(int& x, int& y)
+	{
+		const int64_t v = m_click.exchange(-1);
+		if (v < 0) return false;
+		x = static_cast<int>(v >> 32);
+		y = static_cast<int>(v & 0xFFFFFFFF);
+		return true;
+	}
+
 	// マウスのカーソルの位置 (クライアント座標のピクセル)。ウィンドウの外なら false (どのスレッドからでもよい)
 	bool cursor(int& x, int& y) const
 	{
@@ -83,6 +94,9 @@ private:
 	int  m_lastX = 0, m_lastY = 0;
 	std::atomic<int64_t> m_cursor { -1 };   // (x << 32) | y、外なら -1
 	bool                 m_tracking = false; // WM_MOUSELEAVE を頼んだ
+	int                  m_downX = 0, m_downY = 0;   // 左ボタンを押した位置 (クリックの判定)
+	int                  m_moved = 0;                // 押してから動いた距離 (ピクセル、マンハッタン)
+	std::atomic<int64_t> m_click { -1 };             // (x << 32) | y、なければ -1
 
 	std::mutex  m_inputMutex;
 	CameraInput m_input;

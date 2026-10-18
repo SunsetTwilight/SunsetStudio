@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { call, isConnected, on, StudioError } from '../bridge/client';
 import type { JsonObject, JsonValue, PipelineInfo, TypeDescription } from '../bridge/protocol';
 import { PassEditor, ResourceEditor } from '../inspector/GraphEditors';
+import { ObjectEditor } from '../inspector/ObjectEditor';
 import { SchemaForm, formatPath, type Path } from '../inspector/SchemaForm';
 import { studioStore, useStudio } from '../state/store';
 
@@ -37,8 +38,26 @@ type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; text: string };
 export function InspectorPanel() {
   const selection = useStudio((s) => s.selection);
   const graph = useStudio((s) => s.graph);
+  const scene = useStudio((s) => s.scene);
   if (!isConnected()) return <div className="panel"><div className="placeholder">エディターの中で表示されます</div></div>;
 
+  if (selection?.kind === 'object' && scene) {
+    const obj = scene.scene.objects.find((o) => o.id === selection.id);
+    return (
+      <div className="panel inspector">
+        <header className="panel-header">
+          <span className="panel-title">物体: {obj?.name || selection.id}</span>
+          <span className="spacer" />
+          <button onClick={() => studioStore.select(null)} title="パイプラインの編集に戻る">
+            パイプライン
+          </button>
+        </header>
+        <div className="inspector-body">
+          <ObjectEditor scene={scene.scene} id={selection.id} />
+        </div>
+      </div>
+    );
+  }
   if ((selection?.kind === 'pass' || selection?.kind === 'resource') && graph) {
     return (
       <div className="panel inspector">

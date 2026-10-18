@@ -1031,3 +1031,82 @@ button.link:disabled {
 .chip.legacy {
   border-color: var(--warn, #d7ba7d);
 }
+
+/* ---- シーン (M5-2) ---- */
+.scene-panel {
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.scene-body {
+  flex: 1;
+  overflow: auto;
+  padding: 2px 0;
+}
+.scene-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  font-size: 13px;
+  cursor: default;
+}
+.scene-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.scene-row.selected {
+  background: rgba(232, 145, 90, 0.22);
+}
+.scene-row.hidden-object .scene-name {
+  color: var(--muted);
+}
+.scene-fold,
+.scene-eye {
+  width: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+.scene-swatch {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.scene-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scene-model {
+  font-size: 11px;
+}
+.vec3 {
+  display: flex;
+  gap: 6px;
+}
+.vec3 label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+}
+.vec3 input.number {
+  width: 64px;
+}
+.vec3-x {
+  color: #e57373;
+}
+.vec3-y {
+  color: #81c784;
+}
+.vec3-z {
+  color: #64b5f6;
+}
+.form-section {
+  margin: 10px 8px 2px;
+  font-size: 11px;
+}

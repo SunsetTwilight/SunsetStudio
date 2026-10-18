@@ -33,6 +33,8 @@ add_library(studio_services STATIC
     src/services/UndoStack.cpp
     src/services/AssetFiles.h         # アセットのファイル (パスの検証、一覧、テンプレート)
     src/services/AssetFiles.cpp
+    src/services/Scene.h              # シーンのファイル (配置、親子、選択の判定)
+    src/services/Scene.cpp
 )
 target_include_directories(studio_services PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(studio_services
@@ -47,6 +49,7 @@ add_executable(SunsetEditor
     src/app/EditorApp.cpp
     src/app/EditorWindows.cpp
     src/app/EditorAssets.cpp
+    src/app/EditorScene.cpp
     src/host/WebHost.h
     src/host/WebHost.cpp
     src/host/FileDialog.h
@@ -60,6 +63,8 @@ add_executable(SunsetEditor
     src/render/ViewportRenderer.cpp
     src/render/ResourceViewer.h
     src/render/ResourceViewer.cpp
+    src/render/SelectionOutline.h
+    src/render/SelectionOutline.cpp
     src/viewport/ViewportWindow.h
     src/viewport/ViewportWindow_win32.cpp
     src/viewport/FloatingWindow.h

@@ -23,6 +23,8 @@ import { StartScreen } from './panels/StartScreen';
 import { PreviewPanel, type PreviewParams } from './panels/PreviewPanel';
 import { AssetPanel, type AssetParams } from './panels/AssetPanel';
 import { PipelinePanel, type PipelineParams } from './panels/PipelinePanel';
+import { ScenePanel } from './panels/ScenePanel';
+import { loadScene } from './state/scene';
 import { loadPipelineShaders, loadShaderErrors } from './state/assets';
 import { setViewer, ViewerPanel } from './panels/ViewerPanel';
 import { NodeEditorPanel } from './nodegraph/NodeEditorPanel';
@@ -38,6 +40,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   log: () => <LogPanel />,
   viewer: () => <ViewerPanel />,
   nodes: () => <NodeEditorPanel />,
+  scene: () => <ScenePanel />,
   preview: (props) => <PreviewPanel {...(props as IDockviewPanelProps<PreviewParams>)} />,
   asset: (props) => <AssetPanel {...(props as IDockviewPanelProps<AssetParams>)} />,
   pipeline: (props) => <PipelinePanel {...(props as IDockviewPanelProps<PipelineParams>)} />,
@@ -53,6 +56,12 @@ function defaultLayout(event: DockviewReadyEvent) {
     title: 'レンダーグラフ',
     position: { referencePanel: 'viewport', direction: 'left' },
     initialWidth: 300,
+  });
+  api.addPanel({
+    id: 'scene',
+    component: 'scene',
+    title: 'シーン',
+    position: { referencePanel: 'graph', direction: 'within' },
   });
   api.addPanel({
     id: 'inspector',
@@ -102,6 +111,18 @@ export function App() {
     const offPreview = on('preview.changed', (e) => studioStore.setPreviews(e.previews));
     const offFloat = on('viewport.changed', (e) => studioStore.setViewportFloating(e.floating));
     const offShader = on('shader.status', (e) => studioStore.setShaderStatus(e.path, e.ok, e.text));
+    // シーン: 元に戻す / やり直す / 保存で変わったら読み直す。ビューポートのクリックで選ぶ
+    const offScene = on('scene.changed', (e) => {
+      const cur = studioStore.get().scene;
+      if (!cur || cur.revision !== e.revision) void loadScene();
+      else if (cur.dirty !== e.dirty) studioStore.setScene({ ...cur, dirty: e.dirty });
+    });
+    const offPicked = on('scene.picked', (e) => {
+      if (e.id) {
+        studioStore.select({ kind: 'object', id: e.id });
+        showPanel('inspector');
+      } else if (studioStore.get().selection?.kind === 'object') studioStore.select(null);
+    });
     installEventSink();
     const off = () => {
       offLog();
@@ -114,6 +135,8 @@ export function App() {
       offPreview();
       offFloat();
       offShader();
+      offScene();
+      offPicked();
     };
 
     if (!isConnected()) {
@@ -160,7 +183,15 @@ export function App() {
     call('preview.list').then((r) => studioStore.setPreviews(r.previews)).catch(() => {});
     call('viewport.state').then((r) => studioStore.setViewportFloating(r.floating)).catch(() => {});
     void loadShaderErrors();
+    void loadScene();
   }, [project?.open, project?.file]);
+
+  // 選んでいる物体をビューポートに伝える (辺の印)
+  const selection = useStudio((s) => s.selection);
+  const selectedObject = selection?.kind === 'object' ? selection.id : '';
+  useEffect(() => {
+    if (isConnected() && project?.open) void call('scene.select', { id: selectedObject }).catch(() => {});
+  }, [selectedObject, project?.open]);
 
   // パイプラインが使うシェーダー (ノードの表示と右クリックのメニュー)。グラフが変わったら読み直す
   const graphPipelines = useStudio((s) => s.graph?.pipelines.join('\n') ?? '');
@@ -232,6 +263,9 @@ export function App() {
             </span>
             <button onClick={() => void closeProject()} title="プロジェクトを閉じて起動画面に戻る">
               閉じる
+            </button>
+            <button onClick={() => showPanel('scene')} title="シーンの物体の一覧 (配置はインスペクターで編集)">
+              シーン
             </button>
             <button onClick={() => showPanel('nodes')} title="レンダーグラフをノードと線で編集する">
               ノードエディター

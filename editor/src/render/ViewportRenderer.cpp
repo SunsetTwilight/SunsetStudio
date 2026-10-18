@@ -99,33 +99,14 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 		return false;
 	}
 
-	// ---- 並べる立方体 (動かないので、定数は最初に 1 回だけ書く) ----
-	const float palette[5][3] = {
-		{ 0.80f, 0.36f, 0.20f }, { 0.25f, 0.55f, 0.80f }, { 0.35f, 0.70f, 0.40f },
-		{ 0.85f, 0.75f, 0.30f }, { 0.60f, 0.45f, 0.75f },
-	};
-	auto addObject = [&](const Mat4& world, const float* rgb) {
-		ObjectConstants o;
-		o.world = world;
-		o.color[0] = rgb[0]; o.color[1] = rgb[1]; o.color[2] = rgb[2]; o.color[3] = 1;
-		Object obj;
-		obj.cb = engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform });
-		if (obj.cb.valid())
-		{
-			engine.updateBuffer(obj.cb, &o, sizeof(o));
-			m_objects.push_back(obj);
-		}
-	};
-	for (int z = -3; z <= 3; ++z)
-		for (int x = -3; x <= 3; ++x)
-		{
-			if (x == 0 && z == 0)
-				continue;
-			const float h = 0.6f + 1.4f * (0.5f + 0.5f * std::sin(x * 1.3f + z * 0.7f));
-			addObject(Mat4::translateScale({ x * 3.0f, h * 0.5f, z * 3.0f }, { 1.4f, h, 1.4f }), palette[(x + z + 12) % 5]);
-		}
-	const float centerColor[3] = { 0.92f, 0.55f, 0.30f };
-	addObject(Mat4::translateScale({ 0, 1.5f, 0 }, { 3, 3, 3 }), centerColor);
+	// ---- 選択の印 (作れなくてもビューポートは描く) ----
+	{
+		std::string outlineError;
+		m_outlineOk = m_outline.init(engine, outlineError);
+		if (!m_outlineOk)
+			m_viewerError += (m_viewerError.empty() ? "" : "\n") + outlineError;
+	}
+	// 物体はシーンのファイルから (setScene)
 	return true;
 }
 
@@ -138,6 +119,10 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 	m_graph.reset();
 	m_viewer.shutdown(engine);
 	m_viewerOk = false;
+	m_outline.shutdown(engine);
+	m_outlineOk = false;
+	m_sceneDesc = {};
+	m_selection.clear();
 	for (auto& o : m_objects)
 		engine.destroyBuffer(o.cb);
 	m_objects.clear();
@@ -230,11 +215,80 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 		return;
 	cb->begin();
 	m_executor->record(cb, m_graph->desc(), m_graph->compiled(), in);
+	// 選んでいる物体の印 (リソースビューアーで別のものを表示しているときは描かない)
+	if (m_outlineOk && !m_selection.empty() && !(m_viewerOk && m_viewer.settings().enabled))
+		for (const Object& o : m_objects)
+			if (o.id == m_selection && o.visible)
+				m_outline.record(cb, rt, width, height, fc.viewProj, o.world);
 	if (m_viewerOk)
 		m_viewer.record(engine, cb, *m_executor, rt, width, height, cursorX, cursorY, camera.zNear(), camera.zFar());
 	cb->end();
 	engine.submitCommandBuffers({ cb });
 	cb->release();
+}
+
+void ViewportRenderer::setScene(GraphicsEngine& engine, const SceneDesc& scene)
+{
+	const std::vector<Matrix> world   = worldMatrices(scene);
+	const std::vector<bool>   visible = effectiveVisibility(scene);
+	// 定数バッファは使い回し、足りなければ作り、余れば消す (エンジンが GPU の使い終わりまで解放を遅らせる)
+	while (m_objects.size() > scene.objects.size())
+	{
+		engine.destroyBuffer(m_objects.back().cb);
+		m_objects.pop_back();
+	}
+	m_objects.resize(scene.objects.size());
+	for (size_t i = 0; i < scene.objects.size(); ++i)
+	{
+		const SceneObject& so = scene.objects[i];
+		Object& o = m_objects[i];
+		if (!o.cb.valid())
+			o.cb = engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform });
+		o.id      = so.id;
+		o.layer   = so.layer;
+		o.visible = visible[i];
+		o.cube    = so.model == "builtin:cube";
+		std::copy(world[i].begin(), world[i].end(), o.world.m);
+		ObjectConstants c;
+		c.world = o.world;
+		std::copy(so.color.begin(), so.color.end(), c.color);
+		if (o.cb.valid())
+			engine.updateBuffer(o.cb, &c, sizeof(c));
+	}
+	m_sceneDesc = scene;
+}
+
+std::string ViewportRenderer::pick(int x, int y, uint32_t width, uint32_t height, const OrbitCamera& camera) const
+{
+	if (width == 0 || height == 0 || x < 0 || y < 0)
+		return {};
+	const Mat4 viewProj = camera.projection(static_cast<float>(width) / static_cast<float>(height)) * camera.view();
+	const Mat4 inv      = Mat4::inverse(viewProj);
+	const float nx = (x + 0.5f) / width * 2.0f - 1.0f;
+	const float ny = 1.0f - (y + 0.5f) / height * 2.0f;
+	auto unproject = [&](float z) {
+		const float v[4] = { nx, ny, z, 1 };
+		float r[4] = {};
+		for (int row = 0; row < 4; ++row)
+			for (int k = 0; k < 4; ++k)
+				r[row] += inv.m[k * 4 + row] * v[k];
+		return std::array<float, 3>{ r[0] / r[3], r[1] / r[3], r[2] / r[3] };
+	};
+	const auto n = unproject(0.0f), f = unproject(1.0f);
+	std::array<float, 3> dir = { f[0] - n[0], f[1] - n[1], f[2] - n[2] };
+	const float len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+	if (len <= 0)
+		return {};
+	for (float& d : dir) d /= len;
+	std::vector<Matrix> world;
+	for (const Object& o : m_objects)
+	{
+		Matrix m;
+		std::copy(o.world.m, o.world.m + 16, m.begin());
+		world.push_back(m);
+	}
+	const int i = pickObject(m_sceneDesc, world, n, dir);
+	return i >= 0 ? m_sceneDesc.objects[static_cast<size_t>(i)].id : std::string();
 }
 
 void ViewportRenderer::drawPreview(GraphicsEngine& engine, IRenderTarget* rt, uint32_t width, uint32_t height,
@@ -266,7 +320,7 @@ void ViewportRenderer::drawPreview(GraphicsEngine& engine, IRenderTarget* rt, ui
 
 void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::DrawContext& ctx)
 {
-	if (query.layer == "Opaque")
+	if (query.layer != "Grid")   // シーンの物体: layer が同じものを描く (M5-4 からはマテリアルパス)
 	{
 		const int32_t objectParam = ctx.paramOf("object");
 		const GfxVertexBufferBinding vb{ m_vb, 0, 0, sizeof(Vertex) };
@@ -277,6 +331,8 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 		ctx.cb->setIndexBuffer(ib);
 		for (const Object& o : m_objects)
 		{
+			if (!o.visible || !o.cube || o.layer != query.layer)
+				continue;
 			if (objectParam >= 0)
 				ctx.cb->setRootDescriptor(static_cast<uint32_t>(objectParam), o.cb, 0);
 			ctx.cb->drawIndexedInstanced(36);

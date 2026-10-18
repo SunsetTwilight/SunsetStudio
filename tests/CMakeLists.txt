@@ -50,6 +50,7 @@ add_executable(studio_tests_unit
     test_project.cpp
     test_undo.cpp
     test_asset_files.cpp
+    test_scene.cpp
 )
 target_link_libraries(studio_tests_unit PRIVATE studio_bridge studio_services studio_doctest studio_options)
 add_test(NAME unit COMMAND studio_tests_unit)

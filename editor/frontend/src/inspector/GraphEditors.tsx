@@ -15,7 +15,7 @@ import { showInViewer } from '../panels/ViewerPanel';
 import { renamePass, renameResource } from '../nodegraph/model';
 
 // 名前の欄 (Enter かフォーカスを外したときに確定する)
-function NameBox({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+export function NameBox({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
   const commit = () => {
@@ -69,7 +69,7 @@ function Select({ value, options, onChange }: { value: string; options: string[]
   );
 }
 
-function NumberBox({ value, min, step, onCommit }: { value: number; min?: number; step?: number; onCommit: (v: number) => void }) {
+export function NumberBox({ value, min, step, onCommit }: { value: number; min?: number; step?: number; onCommit: (v: number) => void }) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
   const commit = () => {
