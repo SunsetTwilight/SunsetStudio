@@ -19,6 +19,7 @@ export interface AppInfo {
   protocol: number;
   engine: EngineInfo;
   methods: string[];
+  window?: { customFrame: boolean; maximized: boolean; devTools: boolean }; // UI が描くタイトルバー
 }
 
 export type LogLevel = 'error' | 'warning' | 'info';
@@ -57,6 +58,8 @@ export interface ViewportRect {
   height: number;
   dpr: number;
   visible: boolean;
+  // ビューポートに重なる Web の要素 (メニューなど) の矩形 (CSS px)。その部分を切り抜いて Web を見せる
+  holes?: { x: number; y: number; width: number; height: number }[];
 }
 
 // ---- スキーマ (gfxDescribeStruct / gfxDescribeEnum の JSON) ----
@@ -343,6 +346,12 @@ export interface Methods {
   'library.refresh': { params: Record<string, never>; result: { created: number; reIded: number; reloaded: string[] } };
   'library.reimport': { params: { id: string }; result: { id: string } };
   'library.load': { params: { id: string }; result: { id: string; status: string } };
+  'window.minimize': { params: Record<string, never>; result: { maximized: boolean } };
+  'window.toggleMaximize': { params: Record<string, never>; result: { maximized: boolean } };
+  'window.close': { params: Record<string, never>; result: Record<string, never> };
+  'window.startDrag': { params: Record<string, never>; result: Record<string, never> };
+  'window.startResize': { params: { edge: 'top' | 'topleft' | 'topright' }; result: Record<string, never> };
+  'window.devTools': { params: Record<string, never>; result: Record<string, never> };
   'project.layout.get': { params: Record<string, never>; result: { layout: JsonValue } };
   'project.layout.set': { params: { layout: JsonValue }; result: Record<string, never> };
   'dialog.openProject': { params: Record<string, never>; result: { file: string | null } };
@@ -394,4 +403,5 @@ export interface Events {
   'scene.changed': { revision: number; dirty: boolean };
   'scene.picked': { id: string };
   'library.changed': Record<string, never>;
+  'window.state': { maximized: boolean };
 }

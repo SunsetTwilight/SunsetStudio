@@ -30,6 +30,8 @@ export interface StudioState {
   pipelineShaders: Record<string, PipelineShaders>; // パイプラインのアセット → シェーダーのファイル
   scene: SceneInfo | null; // ビューポートのシーン (M5-2)
   library: LibraryInfo | null; // アセットのライブラリ (M5-3)
+  windowMaximized: boolean; // メインのウィンドウが最大化しているか (タイトルバーのボタン)
+  commandError: string; // メニューの操作の失敗 (タイトルバーに出す)
 }
 
 export interface PipelineShaders {
@@ -40,7 +42,7 @@ export interface PipelineShaders {
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, shaderErrors: {}, pipelineShaders: {}, scene: null, library: null };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, windowMaximized: false, commandError: '' };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -54,7 +56,7 @@ export const studioStore = {
     listeners.add(fn);
     return () => listeners.delete(fn);
   },
-  setInfo: (info: AppInfo) => set({ info, engine: state.engine ?? info.engine }),
+  setInfo: (info: AppInfo) => set({ info, engine: state.engine ?? info.engine, windowMaximized: info.window?.maximized ?? false }),
   setEngine: (engine: EngineInfo) => set({ engine }),
   setStats: (stats: FrameStats) => set({ stats }),
   setConnError: (connError: string | null) => set({ connError }),
@@ -81,6 +83,8 @@ export const studioStore = {
   setPipelineShaders: (pipelineShaders: Record<string, PipelineShaders>) => set({ pipelineShaders }),
   setScene: (scene: SceneInfo | null) => set({ scene }),
   setLibrary: (library: LibraryInfo | null) => set({ library }),
+  setWindowMaximized: (windowMaximized: boolean) => set({ windowMaximized }),
+  setCommandError: (commandError: string) => set({ commandError }),
   // プロジェクトが変わったら、前のプロジェクトのグラフと選択と統計は捨てる
   setProject: (project: ProjectInfo) =>
     set(

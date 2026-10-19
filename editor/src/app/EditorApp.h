@@ -18,6 +18,8 @@
 //             preview.open / preview.set / preview.setRect / preview.close / preview.list
 //                                                                              (プレビュー: 別ウィンドウ / タブ、M4)
 //             viewport.float / viewport.state                                  (ビューポートを別ウィンドウにする、M4)
+//             window.minimize / window.toggleMaximize / window.close / window.startDrag / window.startResize /
+//             window.devTools                                                  (UI が描くタイトルバー)
 //             asset.list / asset.read / asset.write / asset.templates / asset.create / asset.openExternal /
 //             shader.compile / shader.usages / shader.status                   (シェーダー / パイプラインの編集、M4)
 //             library.list / library.import / library.refresh / library.reimport / library.load
@@ -30,7 +32,8 @@
 //             preview.changed (プレビューの一覧) / viewport.changed (ビューポートが別ウィンドウか) /
 //             shader.status (シェーダーのコンパイルの成否が変わった) /
 //             scene.changed (シーンの版と保存の状態) / scene.picked (ビューポートのクリックで選んだ物体) /
-//             library.changed (アセットの一覧かモデルの読み込みの状態が変わった)
+//             library.changed (アセットの一覧かモデルの読み込みの状態が変わった) /
+//             window.state (最大化の状態が変わった)
 // ============================================================
 
 #include "host/WebHost.h"
@@ -64,6 +67,7 @@ struct EditorOptions
 	std::string uiDevUrl;            // STUDIO_UI_DEV_URL (Vite の開発サーバー)
 	bool        devTools  = false;   // STUDIO_DEVTOOLS=1 / Debug ビルド
 	bool        software  = false;   // --software / STUDIO_ADAPTER=software (WARP)
+	bool        nativeTitleBar = false;   // --native-titlebar / STUDIO_NATIVE_TITLEBAR=1: OS のタイトルバーを使う (UI のタイトルバーを出さない)
 	bool        smokeTest = false;   // --smoke-test: UI とエンジンとビューポートが動いたら終了する (自動テスト用)
 	int         smokeTimeoutSec = 60;
 	uint64_t    smokeFrames     = 30;   // スモークテストで描けたことにするフレーム数

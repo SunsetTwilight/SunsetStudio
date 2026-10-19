@@ -14,6 +14,7 @@
 // ============================================================
 
 #include <atomic>
+#include <vector>
 #include <cstdint>
 #include <mutex>
 
@@ -47,6 +48,11 @@ public:
 
 	// 親のクライアント座標 (物理ピクセル) に置く。幅か高さが 0、または visible = false なら隠す
 	void setRect(int x, int y, int width, int height, bool visible);
+
+	// 穴 (このウィンドウのクライアント座標の物理ピクセル)。Web のメニューなどがビューポートに重なる部分を切り抜き、
+	// その下の WebView を見せる (子ウィンドウは Web の UI より手前に出るため)。空なら切り抜かない
+	struct Hole { int x = 0, y = 0, width = 0, height = 0; };
+	void setHoles(const std::vector<Hole>& holes);
 
 	void*    nativeHandle() const { return m_hwnd; }
 	void*    parentHandle() const { return m_parent.load(); }
@@ -89,6 +95,7 @@ private:
 	std::atomic<uint32_t> m_width  { 0 };
 	std::atomic<uint32_t> m_height { 0 };
 	std::atomic_bool      m_visible { false };
+	std::vector<Hole> m_holes;   // 最後に設定した穴 (UI スレッド)
 
 	Drag m_drag  = Drag::None;
 	int  m_lastX = 0, m_lastY = 0;

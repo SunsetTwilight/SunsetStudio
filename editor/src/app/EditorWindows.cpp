@@ -177,6 +177,35 @@ void EditorApp::registerWindowMethods()
 
 	b.registerMethod("preview.list", [this](const Json&, Bridge::Reply r) { r.ok(previewsJson()); });
 
+	// ---- UI が描くタイトルバー (メインのウィンドウの操作) ----
+	b.registerMethod("window.minimize", [this](const Json&, Bridge::Reply r) {
+		m_host.minimizeWindow();
+		r.ok({ { "maximized", m_host.isMaximized() } });
+	});
+	b.registerMethod("window.toggleMaximize", [this](const Json&, Bridge::Reply r) {
+		m_host.toggleMaximize();
+		r.ok({ { "maximized", m_host.isMaximized() } });
+	});
+	b.registerMethod("window.close", [this](const Json&, Bridge::Reply r) {
+		r.ok(Json::object());
+		m_host.closeWindow();   // ×ボタンと同じ (後片付けをしてから閉じる)
+	});
+	// マウスのボタンを押したところから、ウィンドウの移動 / 上の辺での大きさの変更を OS に任せる
+	b.registerMethod("window.startDrag", [this](const Json&, Bridge::Reply r) {
+		m_host.startDrag();
+		r.ok(Json::object());
+	});
+	b.registerMethod("window.startResize", [this](const Json& p, Bridge::Reply r) {
+		if (!m_host.startResize(p.value("edge", std::string())))
+			return r.error(BridgeError::InvalidParams, "edge は top / topleft / topright です (最大化しているときは使えません)");
+		r.ok(Json::object());
+	});
+	b.registerMethod("window.devTools", [this](const Json&, Bridge::Reply r) {
+		if (!m_host.openDevTools())
+			return r.error(BridgeError::Unavailable, "開発者ツールは使えません (--devtools か STUDIO_DEVTOOLS=1 で起動してください)");
+		r.ok(Json::object());
+	});
+
 	// リソースを別ウィンドウに表示する。同じリソースのウィンドウがあれば、設定を変えて前に出す
 	b.registerMethod("preview.open", [this](const Json& p, Bridge::Reply r) {
 		if (!m_project)

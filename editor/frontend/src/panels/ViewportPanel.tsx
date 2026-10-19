@@ -7,6 +7,7 @@
 //
 //  子ウィンドウは Web の UI より手前に出るので、ビューポートの上に UI を重ねられない。
 //  パネルをドラッグしているあいだ (ドロップ先の表示がビューポートに重なる) は隠す。
+//  メニューやダイアログ (data-viewport-hole の要素) が重なる部分は、子ウィンドウを切り抜いてもらう (holes)。
 //  ビューポートを別ウィンドウにしているあいだ (viewport.float) は、C++ は矩形を覚えるだけで、ここには案内を出す。
 // ============================================================
 import { useEffect, useRef } from 'react';
@@ -22,7 +23,8 @@ function sameRect(a: ViewportRect | null, b: ViewportRect): boolean {
     Math.abs(a.x - b.x) < 0.25 &&
     Math.abs(a.y - b.y) < 0.25 &&
     Math.abs(a.width - b.width) < 0.25 &&
-    Math.abs(a.height - b.height) < 0.25
+    Math.abs(a.height - b.height) < 0.25 &&
+    JSON.stringify(a.holes ?? []) === JSON.stringify(b.holes ?? [])
   );
 }
 
@@ -48,7 +50,16 @@ export function ViewportPanel() {
       const el = ref.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
+      // ビューポートに重なるメニューなどの矩形 (重なる部分だけ)
+      const holes: NonNullable<ViewportRect['holes']> = [];
+      document.querySelectorAll('[data-viewport-hole]').forEach((h) => {
+        const b = h.getBoundingClientRect();
+        const x1 = Math.max(b.left, r.left), y1 = Math.max(b.top, r.top);
+        const x2 = Math.min(b.right, r.right), y2 = Math.min(b.bottom, r.bottom);
+        if (x2 > x1 && y2 > y1) holes.push({ x: x1, y: y1, width: x2 - x1, height: y2 - y1 });
+      });
       send({
+        holes,
         x: r.left,
         y: r.top,
         width: r.width,

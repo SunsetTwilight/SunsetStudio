@@ -1184,3 +1184,193 @@ button.link:disabled {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* ---- タイトルバー兼メニューバー ---- */
+.titlebar {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background: var(--panel-header);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+.titlebar-icon {
+  flex: none;
+  width: 34px;
+  text-align: center;
+  color: var(--accent);
+  font-size: 14px;
+}
+.titlebar-resize {
+  position: absolute;
+  top: 0;
+  height: 4px;
+  z-index: 5;
+}
+.titlebar-resize.top {
+  left: 8px;
+  right: 8px;
+  cursor: ns-resize;
+}
+.titlebar-resize.topleft {
+  left: 0;
+  width: 8px;
+  cursor: nwse-resize;
+}
+.titlebar-resize.topright {
+  right: 0;
+  width: 8px;
+  cursor: nesw-resize;
+}
+.menubar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+.menubar-entry {
+  position: relative;
+  display: flex;
+}
+.menubar-button {
+  padding: 0 8px;
+  border: none;
+  border-radius: 4px;
+  margin: 4px 0;
+  background: transparent;
+  font-size: 13px;
+}
+.menubar-button:hover:not(:disabled),
+.menubar-button.open,
+.menubar-button.focus {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: transparent;
+}
+.mnemonic {
+  margin-left: 1px;
+}
+.mnemonic .underline {
+  text-decoration: underline;
+}
+.menu-dropdown {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 0;
+  z-index: 100;
+  min-width: 240px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.menu-dropdown.submenu {
+  top: -5px;
+  left: calc(100% + 2px);
+}
+.menu-item-wrap {
+  position: relative;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 3px 8px 3px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+}
+.menu-item.active:not(:disabled) {
+  background: rgba(232, 145, 90, 0.28);
+  border-color: transparent;
+}
+.menu-item:hover:not(:disabled) {
+  border-color: transparent;
+}
+.menu-check {
+  flex: none;
+  width: 20px;
+  text-align: center;
+}
+.menu-label {
+  flex: 1;
+}
+.menu-shortcut {
+  flex: none;
+  margin-left: 24px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+.titlebar-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 8px;
+  overflow: hidden;
+}
+.titlebar-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.titlebar .chip.error {
+  border-color: var(--error);
+  color: var(--error);
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.titlebar-notice {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.window-controls {
+  flex: none;
+  display: flex;
+  align-self: stretch;
+}
+.window-button {
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  font-size: 10px;
+}
+.window-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: transparent;
+}
+.window-button.close:hover:not(:disabled) {
+  background: #c42b1c;
+  color: #fff;
+}
+.titlebar .modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+}
+.info-dialog p {
+  margin: 0;
+}
+.controls-table td {
+  padding: 2px 12px 2px 0;
+}
+.controls-table td:first-child {
+  color: var(--muted);
+  white-space: nowrap;
+}

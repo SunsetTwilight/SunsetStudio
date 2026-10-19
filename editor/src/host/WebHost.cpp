@@ -114,7 +114,8 @@ bool WebHost::create(const Config& config, std::string& error)
 		        "(https://developer.microsoft.com/microsoft-edge/webview2/)";
 		return false;
 	}
-	m_webview = w;
+	m_webview  = w;
+	m_devTools = config.devTools;
 	webview_set_title(w, config.title.c_str());
 	webview_set_size(w, config.width, config.height, WEBVIEW_HINT_NONE);
 	webview_init(w, k_InitScript);
@@ -249,10 +250,95 @@ void* WebHost::nativeWindow() const
 void WebHost::setCloseHandler(CloseHandler handler)
 {
 	m_closeHandler = std::move(handler);
+	installSubclass();
+}
+
+void WebHost::installSubclass()
+{
 	HWND top = static_cast<HWND>(nativeWindow());
-	if (top)
-		SetWindowSubclass(top,
-			reinterpret_cast<SUBCLASSPROC>(&WebHost::topLevelSubclass), 1, reinterpret_cast<DWORD_PTR>(this));
+	if (top && !m_subclassed)
+		m_subclassed = SetWindowSubclass(top,
+			reinterpret_cast<SUBCLASSPROC>(&WebHost::topLevelSubclass), 1, reinterpret_cast<DWORD_PTR>(this)) != FALSE;
+}
+
+void WebHost::enableCustomFrame(std::function<void(bool maximized)> onMaximized)
+{
+	HWND top = static_cast<HWND>(nativeWindow());
+	if (!top)
+		return;
+	m_onMaximized = std::move(onMaximized);
+	m_customFrame = true;
+	installSubclass();
+	m_lastMaximized = IsZoomed(top) != FALSE;
+	// 枠を計算し直させる (WM_NCCALCSIZE でタイトルバーの分をクライアント領域にする)
+	SetWindowPos(top, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void WebHost::minimizeWindow()
+{
+	if (HWND top = static_cast<HWND>(nativeWindow()))
+		ShowWindow(top, SW_MINIMIZE);
+}
+
+void WebHost::toggleMaximize()
+{
+	if (HWND top = static_cast<HWND>(nativeWindow()))
+		ShowWindow(top, IsZoomed(top) ? SW_RESTORE : SW_MAXIMIZE);
+}
+
+bool WebHost::isMaximized() const
+{
+	HWND top = static_cast<HWND>(nativeWindow());
+	return top && IsZoomed(top);
+}
+
+void WebHost::closeWindow()
+{
+	if (HWND top = static_cast<HWND>(nativeWindow()))
+		PostMessageW(top, WM_CLOSE, 0, 0);
+}
+
+void WebHost::startDrag()
+{
+	HWND top = static_cast<HWND>(nativeWindow());
+	if (!top)
+		return;
+	// WebView が持っているマウスのキャプチャを外し、タイトルバーを押したことにして OS の移動に任せる
+	POINT pt {};
+	GetCursorPos(&pt);
+	ReleaseCapture();
+	PostMessageW(top, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(pt.x, pt.y));
+}
+
+bool WebHost::startResize(const std::string& edge)
+{
+	HWND top = static_cast<HWND>(nativeWindow());
+	if (!top || IsZoomed(top))
+		return false;
+	WPARAM hit = 0;
+	if (edge == "top")           hit = HTTOP;
+	else if (edge == "topleft")  hit = HTTOPLEFT;
+	else if (edge == "topright") hit = HTTOPRIGHT;
+	else return false;
+	POINT pt {};
+	GetCursorPos(&pt);
+	ReleaseCapture();
+	PostMessageW(top, WM_NCLBUTTONDOWN, hit, MAKELPARAM(pt.x, pt.y));
+	return true;
+}
+
+bool WebHost::openDevTools()
+{
+	if (!m_webview || !m_devTools)
+		return false;
+	auto* controller = static_cast<ICoreWebView2Controller*>(
+		webview_get_native_handle(wv(m_webview), WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER));
+	if (!controller)
+		return false;
+	Microsoft::WRL::ComPtr<ICoreWebView2> core;
+	if (FAILED(controller->get_CoreWebView2(&core)) || !core)
+		return false;
+	return SUCCEEDED(core->OpenDevToolsWindow());
 }
 
 intptr_t __stdcall WebHost::topLevelSubclass(void* hwnd, unsigned msg, uintptr_t wp, intptr_t lp, uintptr_t /*id*/, uintptr_t ref)
@@ -271,6 +357,31 @@ intptr_t __stdcall WebHost::topLevelSubclass(void* hwnd, unsigned msg, uintptr_t
 			});
 		}
 		return 0;
+	}
+	if (self->m_customFrame && msg == WM_NCCALCSIZE && wp)
+	{
+		// 左右と下の枠 (大きさを変える縁) は OS のまま、上のタイトルバーの分だけクライアント領域にする
+		auto* p = reinterpret_cast<NCCALCSIZE_PARAMS*>(lp);
+		const LONG top = p->rgrc[0].top;
+		const LRESULT r = DefSubclassProc(h, msg, wp, lp);
+		p->rgrc[0].top = top;
+		// 最大化すると、ウィンドウは枠の分だけ画面の外にはみ出すので、その分を下げる
+		if (IsZoomed(h))
+		{
+			const UINT dpi = GetDpiForWindow(h);
+			p->rgrc[0].top += GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+		}
+		return r;
+	}
+	if (self->m_customFrame && msg == WM_SIZE)
+	{
+		const bool maximized = wp == SIZE_MAXIMIZED;
+		if (wp != SIZE_MINIMIZED && maximized != self->m_lastMaximized)
+		{
+			self->m_lastMaximized = maximized;
+			if (self->m_onMaximized)
+				self->m_onMaximized(maximized);
+		}
 	}
 	if (msg == WM_NCDESTROY)
 		RemoveWindowSubclass(h, reinterpret_cast<SUBCLASSPROC>(&WebHost::topLevelSubclass), 1);

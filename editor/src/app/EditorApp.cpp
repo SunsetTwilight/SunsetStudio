@@ -199,12 +199,15 @@ EditorOptions EditorOptions::fromEnvironment(int argc, char** argv)
 		o.devTools = true;
 	if (getEnv("STUDIO_ADAPTER") == "software")
 		o.software = true;
+	if (getEnv("STUDIO_NATIVE_TITLEBAR") == "1")
+		o.nativeTitleBar = true;
 	for (int i = 1; i < argc; ++i)
 	{
 		const std::string_view a = argv[i];
 		if (a == "--software")   o.software  = true;
 		if (a == "--smoke-test") o.smokeTest = true;
 		if (a == "--devtools")   o.devTools  = true;
+		if (a == "--native-titlebar") o.nativeTitleBar = true;
 	}
 	return o;
 }
@@ -220,6 +223,9 @@ int EditorApp::run()
 		std::cerr << "[SunsetEditor] " << error << "\n";
 		return 1;
 	}
+	// タイトルバーは UI が描く (メニューバーを兼ねる)。--native-titlebar なら OS のまま
+	if (!m_options.nativeTitleBar)
+		m_host.enableCustomFrame([this](bool maximized) { m_host.emit("window.state", { { "maximized", maximized } }); });
 	if (!m_viewport.create(m_host.nativeWindow()))
 	{
 		std::cerr << "[SunsetEditor] ビューポートのウィンドウを作れませんでした\n";
@@ -394,6 +400,8 @@ void EditorApp::registerMethods()
 			{ "protocol", k_ProtocolVersion },
 			{ "engine",   engine },
 			{ "methods",  m_host.bridge().methods() },
+			{ "window",   { { "customFrame", m_host.customFrame() }, { "maximized", m_host.isMaximized() },
+			                { "devTools", m_options.devTools } } },
 		});
 		m_infoRequested = true;
 		checkSmokeTest();
@@ -418,6 +426,19 @@ void EditorApp::registerMethods()
 		const int y2 = static_cast<int>(std::lround((p.at("y").get<double>() + p.at("height").get<double>()) * dpr));
 		m_viewportWebRect = { x, y, std::max(0, x2 - x), std::max(0, y2 - y), visible };
 		m_viewport.setRect(x, y, std::max(0, x2 - x), std::max(0, y2 - y), visible);
+		// Web のメニューなどが重なる部分 (WebView のクライアント座標の CSS px) をビューポートから切り抜く
+		std::vector<ViewportWindow::Hole> holes;
+		if (p.contains("holes") && p.at("holes").is_array())
+			for (const Json& h : p.at("holes"))
+			{
+				const int hx  = static_cast<int>(std::lround(h.value("x", 0.0) * dpr)) - x;
+				const int hy  = static_cast<int>(std::lround(h.value("y", 0.0) * dpr)) - y;
+				const int hx2 = static_cast<int>(std::lround((h.value("x", 0.0) + h.value("width", 0.0)) * dpr)) - x;
+				const int hy2 = static_cast<int>(std::lround((h.value("y", 0.0) + h.value("height", 0.0)) * dpr)) - y;
+				if (hx2 > hx && hy2 > hy)
+					holes.push_back({ hx, hy, hx2 - hx, hy2 - hy });
+			}
+		m_viewport.setHoles(holes);
 		m_render.wake();
 		r.ok({ { "width", m_viewport.width() }, { "height", m_viewport.height() }, { "visible", m_viewport.visible() } });
 	});

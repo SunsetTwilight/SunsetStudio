@@ -8,6 +8,7 @@
 //    openPreviewTab リソースのプレビューをタブ (パネル) で開く。外へ出すとネイティブの別ウィンドウにする
 //    openAssetTab   シェーダー / パイプラインの JSON をタブで編集する (Monaco)
 //    openPipelineTab パイプラインのタブ (シェーダーとのつながり、リフレクション)
+//    defaultLayout  既定の配置 / resetLayout 既定に戻す
 // ============================================================
 import type { DockviewApi } from 'dockview-react';
 import { call, isConnected } from '../bridge/client';
@@ -31,6 +32,65 @@ export const PANEL_TITLES: Record<string, string> = {
   scene: 'シーン',
   library: 'ライブラリ',
 };
+
+// 既定のレイアウト
+export function defaultLayout(api: DockviewApi) {
+  api.addPanel({ id: 'viewport', component: 'viewport', title: 'ビューポート' });
+  api.addPanel({
+    id: 'graph',
+    component: 'graph',
+    title: 'レンダーグラフ',
+    position: { referencePanel: 'viewport', direction: 'left' },
+    initialWidth: 300,
+  });
+  api.addPanel({
+    id: 'scene',
+    component: 'scene',
+    title: 'シーン',
+    position: { referencePanel: 'graph', direction: 'within' },
+  });
+  api.addPanel({
+    id: 'library',
+    component: 'library',
+    title: 'ライブラリ',
+    position: { referencePanel: 'graph', direction: 'within' },
+  });
+  api.addPanel({
+    id: 'inspector',
+    component: 'inspector',
+    title: 'インスペクター',
+    position: { referencePanel: 'viewport', direction: 'right' },
+    initialWidth: 380,
+  });
+  api.addPanel({
+    id: 'nodes',
+    component: 'nodes',
+    title: 'ノードエディター',
+    position: { referencePanel: 'viewport', direction: 'below' },
+    initialHeight: 380,
+  });
+  api.addPanel({
+    id: 'log',
+    component: 'log',
+    title: 'ログ',
+    position: { referencePanel: 'nodes', direction: 'within' },
+  });
+  api.addPanel({
+    id: 'viewer',
+    component: 'viewer',
+    title: 'リソースビューアー',
+    position: { referencePanel: 'nodes', direction: 'within' },
+  });
+  api.getPanel('nodes')?.api.setActive();
+  api.getPanel('viewport')?.api.setActive();
+}
+
+// パネルの配置を既定に戻す (メニューの「表示 > 配置を元に戻す」)。別ウィンドウ (popout) のパネルも戻す
+export function resetLayout() {
+  if (!dockApi) return;
+  dockApi.clear();
+  defaultLayout(dockApi);
+}
 
 // パネルがなければ開く (保存した配置から閉じたパネルを戻す)
 export function showPanel(id: string) {

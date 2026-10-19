@@ -3,6 +3,8 @@
 // ============================================================
 #include "ViewportWindow.h"
 
+#include <algorithm>
+
 #include <windows.h>
 #include <windowsx.h>
 
@@ -99,6 +101,29 @@ void ViewportWindow::setRect(int x, int y, int width, int height, bool visible)
 	else
 		ShowWindow(hwndOf(m_hwnd), SW_HIDE);
 	m_visible = show;
+}
+
+void ViewportWindow::setHoles(const std::vector<Hole>& holes)
+{
+	if (!m_hwnd)
+		return;
+	auto same = [](const Hole& a, const Hole& b) { return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height; };
+	if (holes.size() == m_holes.size() && std::equal(holes.begin(), holes.end(), m_holes.begin(), same))
+		return;
+	m_holes = holes;
+	if (holes.empty())
+	{
+		SetWindowRgn(hwndOf(m_hwnd), nullptr, TRUE);
+		return;
+	}
+	HRGN rgn = CreateRectRgn(0, 0, 0x7FFF, 0x7FFF);
+	for (const Hole& h : holes)
+	{
+		HRGN hole = CreateRectRgn(h.x, h.y, h.x + h.width, h.y + h.height);
+		CombineRgn(rgn, rgn, hole, RGN_DIFF);
+		DeleteObject(hole);
+	}
+	SetWindowRgn(hwndOf(m_hwnd), rgn, TRUE);   // 領域はウィンドウが持つ (消さない)
 }
 
 CameraInput ViewportWindow::takeInput()

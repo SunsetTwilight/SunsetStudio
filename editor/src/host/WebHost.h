@@ -8,6 +8,9 @@
 //      (https://ui.sunset-studio.example/) で開く。開発時は Vite の開発サーバー (localhost のみ)
 //    ・JS → C++: window.__studio_call(method, params) を Bridge に渡す
 //    ・C++ → JS: emit(name, payload) で window.__studio_event(name, payload) を呼ぶ
+//    ・タイトルバー (enableCustomFrame): OS のタイトルバーを消してクライアント領域を上まで広げ、UI がタイトルバーと
+//      メニューを描く (VS Code のような形)。移動 / 上の辺での大きさの変更は、UI のマウスの押下から startDrag /
+//      startResize で OS に任せる (画面の端へのスナップ、Win + 矢印もそのまま効く)
 //
 //  スレッド: post / emit / terminate と Bridge の返答はどのスレッドから呼んでもよい
 //  (webview_dispatch で UI スレッドに渡す)。それ以外は UI スレッドから呼ぶこと。
@@ -64,6 +67,18 @@ public:
 	Bridge& bridge() { return m_bridge; }
 	void*   nativeWindow() const;   // Win32 では HWND
 
+	// ---- タイトルバー (UI スレッドから呼ぶ) ----
+	// OS のタイトルバーを消す。onMaximized は最大化の状態が変わったときに (UI スレッドから) 呼ばれる
+	void enableCustomFrame(std::function<void(bool maximized)> onMaximized);
+	bool customFrame() const { return m_customFrame; }
+	void minimizeWindow();
+	void toggleMaximize();
+	bool isMaximized() const;
+	void closeWindow();                          // ×ボタンと同じ (閉じる前の後片付けも通る)
+	void startDrag();                            // マウスのボタンを押したまま、ウィンドウを動かす
+	bool startResize(const std::string& edge);   // "top" / "topleft" / "topright"。知らない辺なら false
+	bool openDevTools();                         // 開発者ツール (devTools が有効なときだけ)
+
 	// ウィンドウを閉じる操作 (×ボタンなど) のときに呼ぶ。handler は後片付けを始め、
 	// 終わったら proceed を UI スレッドで呼ぶ (呼ぶとウィンドウが閉じる)。UI スレッドから設定すること
 	using CloseHandler = std::function<void(std::function<void()> proceed)>;
@@ -72,6 +87,7 @@ public:
 private:
 	static intptr_t __stdcall topLevelSubclass(void* hwnd, unsigned msg, uintptr_t wp, intptr_t lp, uintptr_t id, uintptr_t ref);
 	void evalNow(const std::string& js);
+	void installSubclass();
 	static void dispatchTrampoline(void* w, void* arg);
 
 	void*                    m_webview = nullptr;   // webview_t
@@ -83,5 +99,10 @@ private:
 	CloseHandler             m_closeHandler;
 	bool                     m_closeApproved = false;
 	bool                     m_closePending  = false;
+	bool                     m_subclassed    = false;
+	bool                     m_customFrame   = false;
+	bool                     m_devTools      = false;
+	bool                     m_lastMaximized = false;
+	std::function<void(bool)> m_onMaximized;
 };
 } // namespace studio
