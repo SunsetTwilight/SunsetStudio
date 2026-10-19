@@ -29,6 +29,7 @@ export const PANEL_TITLES: Record<string, string> = {
   viewer: 'リソースビューアー',
   nodes: 'ノードエディター',
   scene: 'シーン',
+  library: 'ライブラリ',
 };
 
 // パネルがなければ開く (保存した配置から閉じたパネルを戻す)
@@ -41,7 +42,7 @@ export function showPanel(id: string) {
   }
   // シーンはレンダーグラフと同じ場所 (左)、ほかはノードエディターの場所
   const ref =
-    (id === 'scene' ? dockApi.getPanel('graph') : undefined) ?? dockApi.getPanel('nodes') ?? dockApi.getPanel('log') ?? dockApi.getPanel('viewport');
+    (id === 'scene' || id === 'library' ? dockApi.getPanel('graph') : undefined) ?? dockApi.getPanel('nodes') ?? dockApi.getPanel('log') ?? dockApi.getPanel('viewport');
   dockApi.addPanel({
     id,
     component: id,

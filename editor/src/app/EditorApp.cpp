@@ -232,6 +232,7 @@ int EditorApp::run()
 	registerWindowMethods();
 	registerAssetMethods();
 	registerSceneMethods();
+	registerLibraryMethods();
 	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
@@ -354,7 +355,8 @@ int EditorApp::run()
 		watchdogCv.notify_one();
 		watchdog.join();
 	}
-	// エンジン (とスワップチェーン) を終了してから、ビューポートのウィンドウと WebView を破棄する
+	// 取り込みのスレッドを止めてから (結果は捨てる)、エンジン (とスワップチェーン) を終了し、ビューポートのウィンドウと WebView を破棄する
+	m_libraryWorker.stop();
 	m_render.stop();
 	m_previews.clear();
 	m_viewport.destroy();

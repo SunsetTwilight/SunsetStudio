@@ -20,6 +20,8 @@
 //             viewport.float / viewport.state                                  (ビューポートを別ウィンドウにする、M4)
 //             asset.list / asset.read / asset.write / asset.templates / asset.create / asset.openExternal /
 //             shader.compile / shader.usages / shader.status                   (シェーダー / パイプラインの編集、M4)
+//             library.list / library.import / library.refresh / library.reimport / library.load
+//                                                                              (アセットのライブラリ、M5-3)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
 //             stats (フレーム時間とパスごとの GPU 時間) / graph.changed (グラフが切り替わった) /
 //             project.changed (プロジェクトを開いた / 閉じた) / edit.changed (履歴の状態) /
@@ -27,10 +29,13 @@
 //             viewer.pixel (リソースビューアーのピクセルの値と状態) /
 //             preview.changed (プレビューの一覧) / viewport.changed (ビューポートが別ウィンドウか) /
 //             shader.status (シェーダーのコンパイルの成否が変わった) /
-//             scene.changed (シーンの版と保存の状態) / scene.picked (ビューポートのクリックで選んだ物体)
+//             scene.changed (シーンの版と保存の状態) / scene.picked (ビューポートのクリックで選んだ物体) /
+//             library.changed (アセットの一覧かモデルの読み込みの状態が変わった)
 // ============================================================
 
 #include "host/WebHost.h"
+#include "services/BackgroundQueue.h"
+#include "services/ProjectAssets.h"
 #include "services/Project.h"
 #include "services/Scene.h"
 #include "services/UndoStack.h"
@@ -84,6 +89,14 @@ private:
 	void registerWindowMethods();   // EditorWindows.cpp
 	void registerAssetMethods();    // EditorAssets.cpp
 	void registerSceneMethods();    // EditorScene.cpp
+	void registerLibraryMethods();  // EditorLibrary.cpp
+	// ---- アセットのライブラリ (EditorLibrary.cpp、UI スレッド) ----
+	void openLibrary();                               // プロジェクトを開いた / 閉じたとき
+	Json libraryJson() const;
+	void requestSceneModels();                        // シーンが使うモデルで、まだ読んでいないものを読む
+	void requestModel(const std::string& id);         // 別のスレッドで取り込んで読み、描画スレッドに渡す
+	void onModelLoaded(uint64_t generation, const std::string& id, uint64_t ticket,
+	                   std::shared_ptr<const sunset::asset::Model> model, const sunset::asset::Diagnostics& diag, double ms);
 	Json sceneInfoJson() const;
 	void emitSceneChanged();
 	void pushSceneToRenderer();
@@ -188,7 +201,19 @@ private:
 	std::string m_sceneSelection;
 	uint64_t    m_sceneRevision = 0;
 	bool        m_sceneDirty    = false;   // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ。UI スレッド)
+	// アセットのライブラリ (UI スレッドだけが触る。取り込みは m_libraryWorker で)
+	ProjectAssets   m_library;
+	uint64_t        m_libraryGeneration = 0;   // プロジェクトを開き直したら上げる (前のプロジェクトの結果を捨てる)
+	struct ModelState
+	{
+		std::string status;   // "loading" / "ready" / "error"
+		std::string error;
+		Json        info;     // ノード / メッシュ / 頂点 / 三角形 / スロットの数
+		uint64_t    ticket = 0;
+	};
+	std::map<std::string, ModelState> m_modelStates;
 	struct { int x = 0, y = 0, w = 0, h = 0; bool visible = false; } m_viewportWebRect;   // Web のパネルの矩形 (戻すときに使う)
 	int      m_exitCode      = 0;
+	BackgroundQueue m_libraryWorker;   // 最後に置く (先に止まる)。run の終わりでも止める
 };
 } // namespace studio

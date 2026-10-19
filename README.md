@@ -1,10 +1,10 @@
 # SunsetStudio
 
-[SunsetGraphicsEngine](../SunsetGraphicsEngine)(描画)と [SunsetMathLib](https://github.com/SunsetTwilight/SunsetMathLib)(数学)を組み合わせるアプリケーションです。最初のアプリは描画エディター(`SunsetEditor`)です。
+[SunsetGraphicsEngine](../SunsetGraphicsEngine)(描画)、[SunsetMathLib](https://github.com/SunsetTwilight/SunsetMathLib)(数学)、[SunsetAsset](https://github.com/SunsetTwilight/SunsetAsset)(アセットの取り込みと管理)を組み合わせるアプリケーションです。最初のアプリは描画エディター(`SunsetEditor`)です。
 
 > **AI を使った開発について**: このリポジトリは、AI (Anthropic の Claude / Claude Code) を使って作成しています。コード、テスト、ドキュメントに AI が書いたものを含みます。コミットのメッセージに `Co-Authored-By: Claude` が付いているものは、AI と一緒に作成したコミットです。
 
-どちらのライブラリも単独で使えるように作られています。このリポジトリはそれらを使う側で、ライブラリのコードは含みません。
+どのライブラリも単独で使えるように作られています。このリポジトリはそれらを使う側で、ライブラリのコードは含みません。
 
 > **現在の状態**: M2c(インスペクター)。`SunsetEditor` は webview のウィンドウに Web UI(React、ドッキングできるパネル)を表示し、ビューポートのパネルにエンジンの描画(ネイティブの子ウィンドウ)を重ねます。インスペクターでは、ビューポートのパイプラインの記述子を D3D12 の構造体のメンバー単位で編集でき、変更はすぐ PSO の作り直しとして反映されます。エンジンのメッセージはログのパネルに、フレームの統計はステータスバーに出ます。
 > 設計: [docs/design/editor-shell.md](docs/design/editor-shell.md)(エディターの骨格)、SunsetGraphicsEngine の [docs/design/editor-architecture.md](../SunsetGraphicsEngine/docs/design/editor-architecture.md)(全体)
@@ -44,6 +44,7 @@ SunsetStudio/
 SunsetGraphicsEngineProject/
 ├── SunsetGraphicsEngine/       ← ライブラリ
 ├── SunsetMathLib/              ← ライブラリ
+├── SunsetAsset/                ← ライブラリ
 └── SunsetStudio/               ← このリポジトリ
 ```
 
@@ -55,6 +56,7 @@ SunsetGraphicsEngineProject/
 |-----------|-----------|---------------------|---------|
 | SunsetGraphicsEngine | — | `SunsetGraphicsEngine::core`、`::schema`、`sunset_gfx_deploy_runtime()` | install 済みなら `find_package`、なければ GitHub のアーカイブを取得 |
 | SunsetMathLib | — | `MathLib::MathLib` | 同上 |
+| SunsetAsset | — | `SunsetAsset::core`、`::model`、`::texture` (モデル / テクスチャの取り込み。中で ufbx / cgltf / stb_image を使う) | 同上 (タグができるまではコミットで固定) |
 | webview/webview 0.12.0 | MIT | `webview::core_static` | アーカイブを URL で取得 (SHA256 で固定)。Windows では configure 時に NuGet から WebView2 SDK のヘッダーを取得する |
 | nlohmann/json 3.12.0 | MIT | `nlohmann_json::nlohmann_json` | アーカイブを URL で取得 (SHA256 で固定) |
 | React / Vite / TypeScript / dockview など | MIT / Apache-2.0 | `editor/frontend/package.json` | npm (`package-lock.json` で固定) |
@@ -81,7 +83,8 @@ cmake --build --preset windows-dev-debug
 build\windows-dev-debug\bin\SunsetEditor.exe
 ```
 
-`FETCHCONTENT_SOURCE_DIR_SUNSETGRAPHICSENGINE` と `FETCHCONTENT_SOURCE_DIR_SUNSETMATHLIB` で、`../SunsetGraphicsEngine` と `../SunsetMathLib` を指定しています。
+`FETCHCONTENT_SOURCE_DIR_SUNSETGRAPHICSENGINE` / `_SUNSETMATHLIB` / `_SUNSETASSET` で、`../SunsetGraphicsEngine`、`../SunsetMathLib`、`../SunsetAsset` を指定しています。
+(すでに構成したビルドフォルダでは、プリセットに足した変数は `cmake --preset <名前>` で構成し直すまで効きません。)
 
 ### 通常用 (GitHub から取得する)
 
@@ -94,10 +97,11 @@ cmake --build --preset windows-debug
 
 | 変数 | 既定値 | 内容 |
 |------|--------|------|
-| `STUDIO_GFX_TAG` | `v0.2.1` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
+| `STUDIO_GFX_TAG` | `v0.4.1` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
 | `STUDIO_MATHLIB_TAG` | `v0.1.0` | SunsetMathLib のタグ / ブランチ / コミット |
+| `STUDIO_ASSET_TAG` | (コミット) | SunsetAsset のタグ / ブランチ / コミット |
 | `STUDIO_GITHUB_OWNER` | `SunsetTwilight` | GitHub のオーナー |
-| `STUDIO_GFX_URL` / `STUDIO_MATHLIB_URL` | 上から組み立てた URL | 取得元を直接指定する場合 |
+| `STUDIO_GFX_URL` / `STUDIO_MATHLIB_URL` / `STUDIO_ASSET_URL` | 上から組み立てた URL | 取得元を直接指定する場合 |
 | `STUDIO_BUILD_UI` | `ON` | フロントエンドを npm でビルドして `bin/ui/index.html` に置く |
 
 既定はリリースのタグです。ライブラリの最新 (`main`) を試すときは `-DSTUDIO_GFX_TAG=main` のように指定します。ブランチを指定した場合、URL が変わらないので、2 回目以降の構成では再ダウンロードされません。最新を取り込むには `--fresh` で構成し直してください。
@@ -127,7 +131,7 @@ MyWork/
 ├── MyWork.sunsetproj   ← プロジェクトファイル (JSON)
 ├── graphs/ pipelines/ shaders/       ← レンダーグラフ、パイプライン、シェーダー (git で管理する)
 ├── scenes/ materials/ lights/        ← シーン、マテリアル、ライトの種類 (M5 で使う)
-├── assets/             ← モデルとテクスチャ (M5 で使う)
+├── assets/             ← モデルとテクスチャ (ライブラリのパネルで取り込む。<ファイル>.meta に ID と設定)
 ├── Saved/              ← パネルの配置など (git で管理しない)
 └── Cache/              ← 作り直せるもの (git で管理しない)
 ```

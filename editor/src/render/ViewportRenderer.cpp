@@ -3,6 +3,8 @@
 // ============================================================
 #include "ViewportRenderer.h"
 
+#include "services/ProjectAssets.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -124,8 +126,13 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 	m_sceneDesc = {};
 	m_selection.clear();
 	for (auto& o : m_objects)
+	{
 		engine.destroyBuffer(o.cb);
+		for (BufferHandle& b : o.drawCBs)
+			engine.destroyBuffer(b);
+	}
 	m_objects.clear();
+	m_models.clear(engine);
 	engine.destroyBuffer(m_vb);
 	engine.destroyBuffer(m_ib);
 	engine.destroyBuffer(m_frameCB);
@@ -219,7 +226,7 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 	if (m_outlineOk && !m_selection.empty() && !(m_viewerOk && m_viewer.settings().enabled))
 		for (const Object& o : m_objects)
 			if (o.id == m_selection && o.visible)
-				m_outline.record(cb, rt, width, height, fc.viewProj, o.world);
+				m_outline.record(cb, rt, width, height, fc.viewProj, o.box);
 	if (m_viewerOk)
 		m_viewer.record(engine, cb, *m_executor, rt, width, height, cursorX, cursorY, camera.zNear(), camera.zFar());
 	cb->end();
@@ -229,12 +236,41 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 
 void ViewportRenderer::setScene(GraphicsEngine& engine, const SceneDesc& scene)
 {
+	m_sceneDesc = scene;
+	updateObjects(engine);
+}
+
+void ViewportRenderer::setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model)
+{
+	if (model)
+	{
+		std::string error;
+		if (!m_models.set(engine, id, *model, error))
+			m_viewerError += (m_viewerError.empty() ? "" : "\n") + error;
+	}
+	else
+		m_models.remove(engine, id);
+	updateObjects(engine);
+}
+
+void ViewportRenderer::updateObjects(GraphicsEngine& engine)
+{
+	const SceneDesc&          scene   = m_sceneDesc;
 	const std::vector<Matrix> world   = worldMatrices(scene);
 	const std::vector<bool>   visible = effectiveVisibility(scene);
 	// 定数バッファは使い回し、足りなければ作り、余れば消す (エンジンが GPU の使い終わりまで解放を遅らせる)
+	auto releaseDraws = [&](Object& o, size_t keep) {
+		while (o.drawCBs.size() > keep)
+		{
+			if (o.drawCBs.back().valid())
+				engine.destroyBuffer(o.drawCBs.back());
+			o.drawCBs.pop_back();
+		}
+	};
 	while (m_objects.size() > scene.objects.size())
 	{
 		engine.destroyBuffer(m_objects.back().cb);
+		releaseDraws(m_objects.back(), 0);
 		m_objects.pop_back();
 	}
 	m_objects.resize(scene.objects.size());
@@ -242,20 +278,48 @@ void ViewportRenderer::setScene(GraphicsEngine& engine, const SceneDesc& scene)
 	{
 		const SceneObject& so = scene.objects[i];
 		Object& o = m_objects[i];
-		if (!o.cb.valid())
-			o.cb = engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform });
 		o.id      = so.id;
 		o.layer   = so.layer;
 		o.visible = visible[i];
 		o.cube    = so.model == "builtin:cube";
+		o.modelId = assetIdOfModel(so.model).value_or(std::string());
 		std::copy(world[i].begin(), world[i].end(), o.world.m);
-		ObjectConstants c;
-		c.world = o.world;
-		std::copy(so.color.begin(), so.color.end(), c.color);
+		o.box = o.world;
+
+		const ModelCache::Gpu* gpu = o.modelId.empty() ? nullptr : m_models.find(o.modelId);
+		if (o.cube)
+		{
+			releaseDraws(o, 0);
+			if (!o.cb.valid())
+				o.cb = engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform });
+			ObjectConstants c;
+			c.world = o.world;
+			std::copy(so.color.begin(), so.color.end(), c.color);
+			if (o.cb.valid())
+				engine.updateBuffer(o.cb, &c, sizeof(c));
+			continue;
+		}
+		// 取り込んだモデル: (ノード, サブメッシュ) ごとに、ワールド × ノードの行列と、物体の色 × スロットの色
 		if (o.cb.valid())
-			engine.updateBuffer(o.cb, &c, sizeof(c));
+			engine.destroyBuffer(o.cb);
+		o.cb = {};
+		const size_t draws = gpu ? gpu->draws.size() : 0;
+		releaseDraws(o, draws);
+		if (gpu)
+			o.box = o.world * gpu->box;
+		for (size_t d = 0; d < draws; ++d)
+		{
+			if (o.drawCBs.size() <= d)
+				o.drawCBs.push_back(engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform }));
+			const ModelCache::Draw& dr = gpu->draws[d];
+			ObjectConstants c;
+			c.world = o.world * dr.node;
+			for (int k = 0; k < 4; ++k)
+				c.color[k] = so.color[static_cast<size_t>(k)] * dr.color[k];
+			if (o.drawCBs[d].valid())
+				engine.updateBuffer(o.drawCBs[d], &c, sizeof(c));
+		}
 	}
-	m_sceneDesc = scene;
 }
 
 std::string ViewportRenderer::pick(int x, int y, uint32_t width, uint32_t height, const OrbitCamera& camera) const
@@ -280,11 +344,12 @@ std::string ViewportRenderer::pick(int x, int y, uint32_t width, uint32_t height
 	if (len <= 0)
 		return {};
 	for (float& d : dir) d /= len;
+	// 判定は物体ごとの箱 (立方体はそのもの、モデルは境界の箱)
 	std::vector<Matrix> world;
 	for (const Object& o : m_objects)
 	{
 		Matrix m;
-		std::copy(o.world.m, o.world.m + 16, m.begin());
+		std::copy(o.box.m, o.box.m + 16, m.begin());
 		world.push_back(m);
 	}
 	const int i = pickObject(m_sceneDesc, world, n, dir);
@@ -336,6 +401,29 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 			if (objectParam >= 0)
 				ctx.cb->setRootDescriptor(static_cast<uint32_t>(objectParam), o.cb, 0);
 			ctx.cb->drawIndexedInstanced(36);
+		}
+		// 取り込んだモデル (M5-3)
+		for (const Object& o : m_objects)
+		{
+			if (!o.visible || o.modelId.empty() || o.layer != query.layer)
+				continue;
+			const ModelCache::Gpu* gpu = m_models.find(o.modelId);
+			if (!gpu)
+				continue;
+			for (size_t d = 0; d < gpu->draws.size() && d < o.drawCBs.size(); ++d)
+			{
+				const ModelCache::Draw& dr   = gpu->draws[d];
+				const ModelCache::Mesh& mesh = gpu->meshes[dr.mesh];
+				const GfxVertexBufferBinding mvb{ mesh.vb, 0, 0, 6 * sizeof(float) };
+				ctx.cb->setVertexBuffers(0, 1, &mvb);
+				GfxIndexBufferBinding mib;
+				mib.buffer = mesh.ib;
+				mib.format = GfxFormat::R32_Uint;
+				ctx.cb->setIndexBuffer(mib);
+				if (objectParam >= 0)
+					ctx.cb->setRootDescriptor(static_cast<uint32_t>(objectParam), o.drawCBs[d], 0);
+				ctx.cb->drawIndexedInstanced(dr.indexCount, 1, dr.indexOffset, 0, 0);
+			}
 		}
 	}
 	else if (query.layer == "Grid")

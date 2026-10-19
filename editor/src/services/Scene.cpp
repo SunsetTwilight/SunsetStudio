@@ -2,6 +2,7 @@
 //  editor/src/services/Scene.cpp
 // ============================================================
 #include "Scene.h"
+#include "ProjectAssets.h"
 
 #include <algorithm>
 #include <cmath>
@@ -134,8 +135,8 @@ bool sceneFromJson(const Json& json, SceneDesc& out, SceneDiagnostics& diag)
 				}
 				if (!validId(o.id))
 					diag.errors.push_back(at + ".id: 英数字と - _ . の 1〜64 文字が必要です (" + o.id + ")");
-				if (o.model != "builtin:cube")
-					diag.warnings.push_back(at + ".model: 知らないモデル (" + o.model + ")。今は builtin:cube だけを描きます");
+				if (o.model != "builtin:cube" && !assetIdOfModel(o.model))
+					diag.warnings.push_back(at + ".model: 知らないモデル (" + o.model + ")。builtin:cube か asset:<ID> を描きます");
 				s.objects.push_back(std::move(o));
 			}
 		}

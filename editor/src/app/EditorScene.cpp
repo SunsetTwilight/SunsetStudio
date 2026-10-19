@@ -34,6 +34,7 @@ void EditorApp::emitSceneChanged()
 
 void EditorApp::pushSceneToRenderer()
 {
+	requestSceneModels();
 	SceneDesc copy = m_sceneData;
 	const std::string selection = m_sceneSelection;
 	m_render.postScene([copy = std::move(copy), selection](GraphicsEngine& engine, ViewportRenderer* scene) {
@@ -46,6 +47,7 @@ void EditorApp::pushSceneToRenderer()
 
 void EditorApp::loadProjectScene()
 {
+	openLibrary();
 	m_sceneData = {};
 	m_sceneError.clear();
 	m_sceneDirty = false;
@@ -106,6 +108,7 @@ void EditorApp::applySceneFromUndo(const SceneDesc& scene)
 {
 	m_sceneData = scene;
 	m_sceneDirty = true;
+	requestSceneModels();
 	++m_sceneRevision;
 	if (!m_sceneSelection.empty() && !m_sceneData.find(m_sceneSelection))
 		m_sceneSelection.clear();

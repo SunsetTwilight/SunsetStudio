@@ -6,8 +6,9 @@
 #  自作ライブラリ:
 #    SunsetGraphicsEngine → SunsetGraphicsEngine::core / ::schema / ::rendergraph、sunset_gfx_deploy_runtime()
 #    SunsetMathLib        → MathLib::MathLib
-#    どちらも install 済みのパッケージがあれば find_package で優先して使う (FIND_PACKAGE_ARGS)。
-#    開発時は FETCHCONTENT_SOURCE_DIR_SUNSETGRAPHICSENGINE / FETCHCONTENT_SOURCE_DIR_SUNSETMATHLIB に
+#    SunsetAsset          → SunsetAsset::core / ::model / ::texture (アセットの取り込みと管理、M5-3)
+#    どれも install 済みのパッケージがあれば find_package で優先して使う (FIND_PACKAGE_ARGS)。
+#    開発時は FETCHCONTENT_SOURCE_DIR_SUNSETGRAPHICSENGINE / _SUNSETMATHLIB / _SUNSETASSET に
 #    ローカルのフォルダを指定すると、ダウンロードせずにそれを使う (CMakePresets.json の *-dev)。
 #
 #  外部ライブラリ (エディター用):
@@ -27,10 +28,14 @@ include(FetchContent)
 set(STUDIO_GITHUB_OWNER "SunsetTwilight" CACHE STRING "自作ライブラリの GitHub のオーナー")
 set(STUDIO_GFX_TAG      "v0.4.1"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
 set(STUDIO_MATHLIB_TAG  "v0.1.0"         CACHE STRING "SunsetMathLib のタグ / ブランチ / コミット")
+# SunsetAsset はまだタグがないので、コミットで固定する (v0.1.0 のタグを作ったら差し替える)
+set(STUDIO_ASSET_TAG    "26096953d8868b1c57a3d16845a5582dcf1f46da" CACHE STRING "SunsetAsset のタグ / ブランチ / コミット")
 set(STUDIO_GFX_URL      "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetGraphicsEngine/archive/${STUDIO_GFX_TAG}.tar.gz"
     CACHE STRING "SunsetGraphicsEngine の取得元 (アーカイブの URL)")
 set(STUDIO_MATHLIB_URL  "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetMathLib/archive/${STUDIO_MATHLIB_TAG}.tar.gz"
     CACHE STRING "SunsetMathLib の取得元 (アーカイブの URL)")
+set(STUDIO_ASSET_URL    "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetAsset/archive/${STUDIO_ASSET_TAG}.tar.gz"
+    CACHE STRING "SunsetAsset の取得元 (アーカイブの URL)")
 
 FetchContent_Declare(SunsetGraphicsEngine
     URL              ${STUDIO_GFX_URL}
@@ -42,6 +47,14 @@ FetchContent_Declare(SunsetMathLib
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     FIND_PACKAGE_ARGS 0.1 NAMES MathLib
 )
+FetchContent_Declare(SunsetAsset
+    URL              ${STUDIO_ASSET_URL}
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    FIND_PACKAGE_ARGS 0.1
+)
+# Studio の中で使うときは、SunsetAsset のテストと install のルールは作らない
+set(SUNSET_ASSET_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SUNSET_ASSET_INSTALL     OFF CACHE BOOL "" FORCE)
 
 # ---- 外部ライブラリ ----
 set(STUDIO_WEBVIEW_VERSION "0.12.0")
@@ -72,7 +85,8 @@ set(WEBVIEW_INSTALL_TARGETS      OFF CACHE BOOL "" FORCE)
 set(WEBVIEW_ENABLE_CHECKS        OFF CACHE BOOL "" FORCE)
 set(WEBVIEW_ENABLE_PACKAGING     OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(SunsetGraphicsEngine SunsetMathLib webview nlohmann_json)
+# nlohmann_json を先に宣言してあるので、SunsetAsset の中の同じ名前の宣言はこちらを使う
+FetchContent_MakeAvailable(SunsetGraphicsEngine SunsetMathLib nlohmann_json SunsetAsset webview)
 
 # webview のソースは UTF-8 (日本語の Windows の既定のコードページでは C4819 の警告になる)
 if(MSVC AND TARGET webview_core_static)
@@ -81,7 +95,7 @@ endif()
 
 # ---- どこから取得したかを表示する ----
 # install 済みのパッケージから来たターゲットは IMPORTED になる
-foreach(_pair "SunsetGraphicsEngine|SunsetGraphicsEngine::core" "SunsetMathLib|MathLib::MathLib")
+foreach(_pair "SunsetGraphicsEngine|SunsetGraphicsEngine::core" "SunsetMathLib|MathLib::MathLib" "SunsetAsset|SunsetAsset::core")
     string(REPLACE "|" ";" _pair "${_pair}")
     list(GET _pair 0 _dep)
     list(GET _pair 1 _tgt)

@@ -13,7 +13,7 @@
 //
 //  ・id はシーンの中で一意 (英数字と - _ .)。parent は親の id (null = 一番上)。循環はエラー
 //  ・rotation はオイラー角 (度)。X → Y → Z の順に回す (world = 親 × T × Rz × Ry × Rx × S)
-//  ・model は "builtin:cube" だけ (モデルの読み込みは M5-3)
+//  ・model は "builtin:cube" (立方体) か "asset:<ID>" (取り込んだモデル。ID は assets/ の .meta の id、M5-3)
 //  ・color と layer はマテリアル (M5-4) ができるまでの仮の項目。layer はレンダーグラフの drawList の layer と合わせる
 //  行列は列優先 (m[列 * 4 + 行]、OrbitCamera.h の Mat4 と同じ)。
 // ============================================================

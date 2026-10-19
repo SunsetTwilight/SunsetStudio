@@ -181,6 +181,46 @@ export interface SceneInfo {
   error?: string; // 読めなかった理由 (編集 / 保存はできない)
 }
 
+// アセットのライブラリ (M5-3): プロジェクトの assets/ (SunsetAsset)
+export interface LibraryModelInfo {
+  nodes: number;
+  meshes: number;
+  vertices: number;
+  triangles: number;
+  slots: number;
+  skins: number;
+  morphs: number;
+  boundsMin: [number, number, number];
+  boundsMax: [number, number, number];
+  loadMs: number;
+}
+export interface LibraryModelState {
+  status: 'loading' | 'ready' | 'error';
+  error?: string;
+  info?: LibraryModelInfo;
+}
+export interface LibraryAsset {
+  id: string; // 小文字の 16 進 32 文字 (シーンは "asset:<id>" で参照する)
+  path: string; // assets/ からの相対パス
+  importer: string; // "model" / "texture" …
+  external: boolean; // 外部のファイルを参照している (コピーしていない)
+  source?: string; // 外部のファイルのパス
+  missing: boolean; // 元のファイルがない
+  cached: boolean; // キャッシュ (Cache/assets) が新しい
+  model?: LibraryModelState; // 読んだ (読んでいる) モデル
+}
+export interface LibraryInfo {
+  assets: LibraryAsset[];
+  extensions: string[];
+}
+export interface LibraryImportResult {
+  canceled?: boolean;
+  id?: string;
+  path?: string;
+  copied?: string[];
+  warnings?: string[];
+}
+
 export interface RecentProject {
   file: string;
   name: string;
@@ -298,6 +338,11 @@ export interface Methods {
   'scene.save': { params: Record<string, never>; result: { revision: number; dirty: boolean } };
   'scene.select': { params: { id: string }; result: { id: string } };
   'scene.pickAt': { params: { x: number; y: number }; result: { id: string } };
+  'library.list': { params: Record<string, never>; result: LibraryInfo };
+  'library.import': { params: { mode: 'copy' | 'link'; file?: string }; result: LibraryImportResult };
+  'library.refresh': { params: Record<string, never>; result: { created: number; reIded: number; reloaded: string[] } };
+  'library.reimport': { params: { id: string }; result: { id: string } };
+  'library.load': { params: { id: string }; result: { id: string; status: string } };
   'project.layout.get': { params: Record<string, never>; result: { layout: JsonValue } };
   'project.layout.set': { params: { layout: JsonValue }; result: Record<string, never> };
   'dialog.openProject': { params: Record<string, never>; result: { file: string | null } };
@@ -348,4 +393,5 @@ export interface Events {
   'shader.status': ShaderStatus;
   'scene.changed': { revision: number; dirty: boolean };
   'scene.picked': { id: string };
+  'library.changed': Record<string, never>;
 }

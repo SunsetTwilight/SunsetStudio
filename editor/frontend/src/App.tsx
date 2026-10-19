@@ -24,6 +24,8 @@ import { PreviewPanel, type PreviewParams } from './panels/PreviewPanel';
 import { AssetPanel, type AssetParams } from './panels/AssetPanel';
 import { PipelinePanel, type PipelineParams } from './panels/PipelinePanel';
 import { ScenePanel } from './panels/ScenePanel';
+import { LibraryPanel } from './panels/LibraryPanel';
+import { loadLibrary } from './state/library';
 import { loadScene } from './state/scene';
 import { loadPipelineShaders, loadShaderErrors } from './state/assets';
 import { setViewer, ViewerPanel } from './panels/ViewerPanel';
@@ -41,6 +43,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   viewer: () => <ViewerPanel />,
   nodes: () => <NodeEditorPanel />,
   scene: () => <ScenePanel />,
+  library: () => <LibraryPanel />,
   preview: (props) => <PreviewPanel {...(props as IDockviewPanelProps<PreviewParams>)} />,
   asset: (props) => <AssetPanel {...(props as IDockviewPanelProps<AssetParams>)} />,
   pipeline: (props) => <PipelinePanel {...(props as IDockviewPanelProps<PipelineParams>)} />,
@@ -61,6 +64,12 @@ function defaultLayout(event: DockviewReadyEvent) {
     id: 'scene',
     component: 'scene',
     title: 'シーン',
+    position: { referencePanel: 'graph', direction: 'within' },
+  });
+  api.addPanel({
+    id: 'library',
+    component: 'library',
+    title: 'ライブラリ',
     position: { referencePanel: 'graph', direction: 'within' },
   });
   api.addPanel({
@@ -117,6 +126,8 @@ export function App() {
       if (!cur || cur.revision !== e.revision) void loadScene();
       else if (cur.dirty !== e.dirty) studioStore.setScene({ ...cur, dirty: e.dirty });
     });
+    // ライブラリ: 取り込み / 読み込みの状態が変わったら読み直す
+    const offLibrary = on('library.changed', () => void loadLibrary());
     const offPicked = on('scene.picked', (e) => {
       if (e.id) {
         studioStore.select({ kind: 'object', id: e.id });
@@ -137,6 +148,7 @@ export function App() {
       offShader();
       offScene();
       offPicked();
+      offLibrary();
     };
 
     if (!isConnected()) {
@@ -266,6 +278,9 @@ export function App() {
             </button>
             <button onClick={() => showPanel('scene')} title="シーンの物体の一覧 (配置はインスペクターで編集)">
               シーン
+            </button>
+            <button onClick={() => showPanel('library')} title="モデルやテクスチャを取り込み、シーンに置く (assets/)">
+              ライブラリ
             </button>
             <button onClick={() => showPanel('nodes')} title="レンダーグラフをノードと線で編集する">
               ノードエディター

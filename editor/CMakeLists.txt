@@ -35,10 +35,13 @@ add_library(studio_services STATIC
     src/services/AssetFiles.cpp
     src/services/Scene.h              # シーンのファイル (配置、親子、選択の判定)
     src/services/Scene.cpp
+    src/services/ProjectAssets.h      # アセットのライブラリ (assets/ と Cache/assets/。SunsetAsset、M5-3)
+    src/services/ProjectAssets.cpp
 )
 target_include_directories(studio_services PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(studio_services
     PUBLIC  SunsetGraphicsEngine::schema nlohmann_json::nlohmann_json
+            SunsetAsset::core SunsetAsset::model SunsetAsset::texture
     PRIVATE studio_options
 )
 
@@ -50,6 +53,7 @@ add_executable(SunsetEditor
     src/app/EditorWindows.cpp
     src/app/EditorAssets.cpp
     src/app/EditorScene.cpp
+    src/app/EditorLibrary.cpp
     src/host/WebHost.h
     src/host/WebHost.cpp
     src/host/FileDialog.h
@@ -65,6 +69,8 @@ add_executable(SunsetEditor
     src/render/ResourceViewer.cpp
     src/render/SelectionOutline.h
     src/render/SelectionOutline.cpp
+    src/render/ModelCache.h
+    src/render/ModelCache.cpp
     src/viewport/ViewportWindow.h
     src/viewport/ViewportWindow_win32.cpp
     src/viewport/FloatingWindow.h

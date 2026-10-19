@@ -1110,3 +1110,77 @@ button.link:disabled {
   margin: 10px 8px 2px;
   font-size: 11px;
 }
+
+/* ---- ライブラリ (M5-3) ---- */
+.library-panel {
+  display: flex;
+  flex-direction: column;
+}
+.library-body {
+  flex: 1;
+  overflow: auto;
+  padding: 2px 0;
+}
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  font-size: 13px;
+  cursor: default;
+}
+.library-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.library-row.selected {
+  background: rgba(232, 145, 90, 0.22);
+}
+.library-row.missing .library-path {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.library-kind {
+  flex: none;
+  width: 64px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.library-kind.model {
+  color: #8fc1ff;
+}
+.library-kind.texture {
+  color: #b9e08f;
+}
+.library-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-place {
+  flex: none;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.library-details {
+  border-top: 1px solid var(--border);
+  padding: 6px 8px;
+  max-height: 40%;
+  overflow: auto;
+}
+.library-hint {
+  font-size: 12px;
+  padding: 4px 0;
+}
+.selectable {
+  user-select: text;
+  word-break: break-all;
+}
+.library-row .badge:not(.error) {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 11px;
+}

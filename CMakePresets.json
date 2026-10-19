@@ -14,10 +14,11 @@
     {
       "name": "local-libraries",
       "hidden": true,
-      "description": "同じワークスペースの隣のフォルダにある SunsetGraphicsEngine / SunsetMathLib を直接使う",
+      "description": "同じワークスペースの隣のフォルダにある SunsetGraphicsEngine / SunsetMathLib / SunsetAsset を直接使う",
       "cacheVariables": {
         "FETCHCONTENT_SOURCE_DIR_SUNSETGRAPHICSENGINE": "${sourceDir}/../SunsetGraphicsEngine",
         "FETCHCONTENT_SOURCE_DIR_SUNSETMATHLIB":        "${sourceDir}/../SunsetMathLib",
+        "FETCHCONTENT_SOURCE_DIR_SUNSETASSET":          "${sourceDir}/../SunsetAsset",
         "FETCHCONTENT_TRY_FIND_PACKAGE_MODE":           "NEVER"
       }
     },

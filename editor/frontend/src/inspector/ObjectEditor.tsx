@@ -1,21 +1,29 @@
 // ============================================================
 //  インスペクター: シーンの物体 (M5-2)
 //
-//  名前、親、位置 / 回転 (度。X → Y → Z の順) / 大きさ、表示、色と layer (マテリアル (M5-4) までの仮の項目)。
+//  名前、モデル (立方体か、ライブラリのモデル、M5-3)、親、位置 / 回転 (度。X → Y → Z の順) / 大きさ、表示、
+//  色と layer (マテリアル (M5-4) までの仮の項目。モデルではスロットの基本色に掛ける)。
 //  変えるとシーン全体の JSON を scene.set で送る (元に戻す / やり直すが効く。保存はシーンのパネル)。
 // ============================================================
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SceneJson, SceneObjectJson } from '../bridge/protocol';
+import { assetOfModel, loadLibrary, modelRef } from '../state/library';
 import { applyScene, fromHex, parentCandidates, toHex, updateObject } from '../state/scene';
+import { useStudio } from '../state/store';
 import { NameBox, NumberBox } from './GraphEditors';
 
 type Vec3 = [number, number, number];
 
 export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
   const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const library = useStudio((s) => s.library);
+  useEffect(() => {
+    if (!library) void loadLibrary();
+  }, [library]);
   const obj = scene.objects.find((o) => o.id === id);
   if (!obj) return <div className="placeholder">物体 '{id}' はありません</div>;
 
+  const current = assetOfModel(library, obj.model);
   const set = async (patch: Partial<SceneObjectJson>, label: string) => {
     const err = await applyScene(updateObject(scene, id, patch), `${obj.name}: ${label}`);
     setStatus(err ? { kind: 'error', text: err } : { kind: 'ok', text: label });
@@ -57,8 +65,23 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
       </div>
       <div className="form-row">
         <span className="form-label">モデル</span>
-        <span className="form-control muted" title="モデルの読み込みは M5-3">{obj.model}</span>
+        <span className="form-control">
+          <select value={obj.model} onChange={(e) => void set({ model: e.target.value }, `モデル = ${e.target.selectedOptions[0]?.text ?? e.target.value}`)}>
+            <option value="builtin:cube">立方体 (builtin:cube)</option>
+            {(library?.assets ?? [])
+              .filter((a) => a.importer === 'model')
+              .map((a) => (
+                <option key={a.id} value={modelRef(a)}>
+                  {a.path}
+                </option>
+              ))}
+            {obj.model !== 'builtin:cube' && !current && <option value={obj.model}>{obj.model} (ライブラリにない)</option>}
+          </select>
+        </span>
       </div>
+      {current?.model?.status === 'loading' && <div className="inspector-status busy">モデルを読み込んでいます…</div>}
+      {current?.model?.status === 'error' && <div className="inspector-status error">{current.model.error}</div>}
+      {current?.missing && <div className="inspector-status error">モデルの元のファイルがありません: {current.path}</div>}
       <div className="form-row">
         <span className="form-label">親</span>
         <span className="form-control">

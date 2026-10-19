@@ -28,7 +28,8 @@ struct ComScope
 	~ComScope() { if (SUCCEEDED(hr)) CoUninitialize(); }
 };
 
-std::optional<std::filesystem::path> runDialog(void* owner, bool folders, const std::filesystem::path& initial)
+std::optional<std::filesystem::path> runDialog(void* owner, bool folders, const std::filesystem::path& initial,
+                                               const std::vector<std::string>* assetExtensions = nullptr)
 {
 	ComScope com;
 	ComPtr<IFileOpenDialog> dlg;
@@ -42,8 +43,18 @@ std::optional<std::filesystem::path> runDialog(void* owner, bool folders, const 
 	else
 		opts |= FOS_FILEMUSTEXIST;
 	dlg->SetOptions(opts);
+	std::wstring spec, label;   // 絞り込みの文字列は Show が終わるまで残す
 	if (folders)
 		dlg->SetTitle(L"プロジェクトを作る場所");
+	else if (assetExtensions)
+	{
+		dlg->SetTitle(L"アセットを取り込む");
+		for (const std::string& e : *assetExtensions)
+			spec += (spec.empty() ? L"*" : L";*") + std::filesystem::path(std::u8string(e.begin(), e.end())).wstring();
+		label = L"取り込めるファイル (" + spec + L")";
+		const COMDLG_FILTERSPEC filters[] = { { label.c_str(), spec.c_str() }, { L"すべてのファイル (*.*)", L"*.*" } };
+		dlg->SetFileTypes(2, filters);
+	}
 	else
 	{
 		dlg->SetTitle(L"プロジェクトを開く");
@@ -78,6 +89,11 @@ std::optional<std::filesystem::path> openProjectDialog(void* ownerWindow)
 std::optional<std::filesystem::path> pickFolderDialog(void* ownerWindow, const std::filesystem::path& initial)
 {
 	return runDialog(ownerWindow, true, initial);
+}
+
+std::optional<std::filesystem::path> openAssetDialog(void* ownerWindow, const std::vector<std::string>& extensions)
+{
+	return runDialog(ownerWindow, false, {}, &extensions);
 }
 
 std::filesystem::path documentsFolder()

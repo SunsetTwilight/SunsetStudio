@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { call, isConnected } from '../bridge/client';
 import { errorText } from '../state/graph';
+import { assetName, assetOfModel } from '../state/library';
 import { addObject, applyScene, duplicateObject, loadScene, newObject, removeObject, sceneTree, toHex, updateObject } from '../state/scene';
 import { studioStore, useStudio } from '../state/store';
 
@@ -16,6 +17,11 @@ type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; text: string };
 
 export function ScenePanel() {
   const info = useStudio((s) => s.scene);
+  const library = useStudio((s) => s.library);
+  const modelLabel = (model: string) => {
+    const a = assetOfModel(library, model);
+    return a ? assetName(a.path) : model.startsWith('asset:') ? '(ないモデル)' : model.replace(/^builtin:/, '');
+  };
   const selection = useStudio((s) => s.selection);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<Status>({ kind: 'idle', text: '' });
@@ -129,7 +135,7 @@ export function ScenePanel() {
             </button>
             <span className="scene-swatch" style={{ background: toHex(obj.color) }} />
             <span className="scene-name">{obj.name || obj.id}</span>
-            <span className="scene-model muted">{obj.model.replace(/^builtin:/, '')}</span>
+            <span className="scene-model muted">{modelLabel(obj.model)}</span>
             <button
               className="scene-eye"
               title={obj.visible ? '表示中 (クリックで隠す)' : '非表示 (クリックで表示)'}

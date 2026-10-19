@@ -3,7 +3,7 @@
 //  パネルは dockview の中で別々に描かれるので、props ではなくここから読む (useStudio)。
 // ============================================================
 import { useSyncExternalStore } from 'react';
-import type { AppInfo, EditState, EngineInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, SceneInfo, ViewerPixel, ViewerSettings } from '../bridge/protocol';
+import type { AppInfo, EditState, EngineInfo, LibraryInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, SceneInfo, ViewerPixel, ViewerSettings } from '../bridge/protocol';
 
 // インスペクターに表示するもの (グラフのパネルで選ぶ)
 export type Selection =
@@ -29,6 +29,7 @@ export interface StudioState {
   shaderErrors: Record<string, string>; // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ)
   pipelineShaders: Record<string, PipelineShaders>; // パイプラインのアセット → シェーダーのファイル
   scene: SceneInfo | null; // ビューポートのシーン (M5-2)
+  library: LibraryInfo | null; // アセットのライブラリ (M5-3)
 }
 
 export interface PipelineShaders {
@@ -39,7 +40,7 @@ export interface PipelineShaders {
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, shaderErrors: {}, pipelineShaders: {}, scene: null };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, shaderErrors: {}, pipelineShaders: {}, scene: null, library: null };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -79,12 +80,13 @@ export const studioStore = {
   },
   setPipelineShaders: (pipelineShaders: Record<string, PipelineShaders>) => set({ pipelineShaders }),
   setScene: (scene: SceneInfo | null) => set({ scene }),
+  setLibrary: (library: LibraryInfo | null) => set({ library }),
   // プロジェクトが変わったら、前のプロジェクトのグラフと選択と統計は捨てる
   setProject: (project: ProjectInfo) =>
     set(
       state.project?.file === project.file && state.project?.open === project.open
         ? { project }
-        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {}, scene: null },
+        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {}, scene: null, library: null },
     ),
 };
 
