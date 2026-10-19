@@ -2,6 +2,8 @@
 
 [SunsetGraphicsEngine](../SunsetGraphicsEngine)(描画)と [SunsetMathLib](https://github.com/SunsetTwilight/SunsetMathLib)(数学)を組み合わせるアプリケーションです。最初のアプリは描画エディター(`SunsetEditor`)です。
 
+> **AI を使った開発について**: このリポジトリは、AI (Anthropic の Claude / Claude Code) を使って作成しています。コード、テスト、ドキュメントに AI が書いたものを含みます。コミットのメッセージに `Co-Authored-By: Claude` が付いているものは、AI と一緒に作成したコミットです。
+
 どちらのライブラリも単独で使えるように作られています。このリポジトリはそれらを使う側で、ライブラリのコードは含みません。
 
 > **現在の状態**: M2c(インスペクター)。`SunsetEditor` は webview のウィンドウに Web UI(React、ドッキングできるパネル)を表示し、ビューポートのパネルにエンジンの描画(ネイティブの子ウィンドウ)を重ねます。インスペクターでは、ビューポートのパイプラインの記述子を D3D12 の構造体のメンバー単位で編集でき、変更はすぐ PSO の作り直しとして反映されます。エンジンのメッセージはログのパネルに、フレームの統計はステータスバーに出ます。
