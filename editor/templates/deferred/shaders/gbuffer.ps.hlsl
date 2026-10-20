@@ -12,6 +12,7 @@ struct MRT
 {
 	float4 albedo : SV_Target0;
 	float4 normal : SV_Target1;   // ワールドの法線を [0, 1] にしたもの
+	uint   mask   : SV_Target2;   // ライトリンクのマスク
 };
 
 MRT main(PSIn i)
@@ -19,5 +20,6 @@ MRT main(PSIn i)
 	MRT o;
 	o.albedo = float4(gColor.rgb, 0);                          // a = 金属度
 	o.normal = float4(normalize(i.normal) * 0.5 + 0.5, 0.6);   // w = 粗さ
+	o.mask   = gLightMask.x;
 	return o;
 }

@@ -3,6 +3,8 @@
 // ============================================================
 #include "SelectionOutline.h"
 
+#include <algorithm>
+
 namespace studio
 {
 namespace
@@ -86,13 +88,16 @@ void SelectionOutline::shutdown(GraphicsEngine& engine)
 	m_vs = m_ps = {};
 }
 
-void SelectionOutline::record(ICommandBuffer* cb, IRenderTarget* rt, uint32_t w, uint32_t h, const Mat4& viewProj, const Mat4& world)
+void SelectionOutline::record(ICommandBuffer* cb, IRenderTarget* rt, uint32_t w, uint32_t h, const Mat4& viewProj, const Mat4& world,
+                              const float* color)
 {
 	if (!m_pipe.valid() || !cb || !rt || w == 0 || h == 0)
 		return;
 	OutlineConstants c;
 	c.mvp = viewProj * world;
 	c.color[0] = 1.0f; c.color[1] = 0.62f; c.color[2] = 0.15f; c.color[3] = 1.0f;   // 橙 (UI のアクセントの色)
+	if (color)
+		std::copy_n(color, 4, c.color);
 	cb->beginEvent("SelectionOutline");
 	cb->setRenderTargets(1, &rt, nullptr, false, false);
 	GfxViewport vp;

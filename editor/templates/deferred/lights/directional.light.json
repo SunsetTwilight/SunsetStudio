@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "label": "平行光源",
+  "shape": "directional",
+  "params": [
+    { "name": "color",     "type": "color", "label": "色",   "default": [1, 1, 1] },
+    { "name": "intensity", "type": "float", "label": "強さ", "default": 1, "min": 0 }
+  ]
+}

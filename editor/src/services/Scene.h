@@ -18,13 +18,19 @@
 //  ・materials はスロットの名前 → マテリアルのファイル (M5-4)。書いていないスロットは、取り込んだ値 (モデルのスロットの
 //    基本色とテクスチャ) の標準のマテリアルで描く。立方体のスロットは "Default"
 //  ・color はマテリアルの色に掛ける色 (同じモデルを 1 体ずつ色違いにする)。M5-2 の layer は読み飛ばす
+//  ・light があれば、その物体はライト (M5-5。モデルは描かない)。
+//      "light": { "type": "point", "params": { "color": [1, 1, 1], "intensity": 5 }, "links": ["hero"] }
+//    type は lights/<種類>.light.json の種類、params はその値 (書いていないものは既定値)、
+//    links は照らす物体の id (子も含む。空 = すべての物体。ライトリンク)。向きはローカルの -Z
 //  行列は列優先 (m[列 * 4 + 行]、OrbitCamera.h の Mat4 と同じ)。
 // ============================================================
 
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,6 +39,13 @@ namespace studio
 using Json = nlohmann::json;
 
 constexpr int k_SceneVersion = 1;
+
+struct SceneLight
+{
+	std::string              type = "point";
+	Json                     params = Json::object();
+	std::vector<std::string> links;   // 照らす物体の id (空 = すべて)
+};
 
 struct SceneObject
 {
@@ -46,6 +59,7 @@ struct SceneObject
 	bool                 visible  = true;
 	std::array<float, 4> color    { 1, 1, 1, 1 };   // マテリアルの色に掛ける
 	std::map<std::string, std::string> materials;   // スロット → マテリアルのファイル (書いていなければ取り込んだ値)
+	std::optional<SceneLight> light;                 // あればライト (M5-5)
 };
 
 struct SceneDesc
@@ -75,7 +89,23 @@ std::vector<Matrix> worldMatrices(const SceneDesc& scene);
 // 親が見えなければ子も見えない
 std::vector<bool> effectiveVisibility(const SceneDesc& scene);
 
-// 新しいプロジェクトの既定のシーン (M4 までの固定の立方体と同じ並び: 中央の大きな立方体 + 周りの 48 個)
+// ---- ライトリンク (M5-5) ----
+// links のあるライトに 1 ビットずつ割り当て (シーンの順、32 個まで)、物体のマスクに、その物体 (や親) を照らす
+// ライトのビットを立てる。links のないライトのマスクは 0xFFFFFFFF (すべての物体を照らす)。
+// G-Buffer に物体のマスクを書き、Lighting で (ライトのマスク == 全部) か (ライトのマスク & 物体のマスク) != 0 なら照らす
+constexpr uint32_t k_LightMaskAll = 0xFFFFFFFFu;
+struct LightLinks
+{
+	std::vector<uint32_t>    objectMasks;   // objects と同じ順 (ライトの物体は 0)
+	std::vector<uint32_t>    lightMasks;    // objects と同じ順 (ライトでない物体は 0)
+	std::vector<std::string> warnings;      // 32 個を超えたなど
+};
+LightLinks computeLightLinks(const SceneDesc& scene);
+// ワールドの行列から、ライトの向き (ローカルの -Z、正規化)
+std::array<float, 3> lightDirection(const Matrix& world);
+
+// 新しいプロジェクトの既定のシーン (M4 までの固定の立方体と同じ並び: 中央の大きな立方体 + 周りの 48 個、
+// M5-5 からは今までの光と同じ向きの平行光源 "Sun")
 SceneDesc defaultScene();
 
 // 使われていない id を作る ("cube-12" など)

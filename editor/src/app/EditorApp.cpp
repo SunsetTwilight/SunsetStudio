@@ -254,7 +254,11 @@ int EditorApp::run()
 	callbacks.message = [this](GfxMessageSeverity s, int32_t id, const std::string& text) { onEngineMessage(s, id, text); };
 	callbacks.init    = [this](const RenderThread::InitResult& r) { onEngineInit(r); };
 	callbacks.stats   = [this](const RenderThread::FrameStats& st) { onStats(st); };
-	callbacks.log     = [this](const std::string& level, const std::string& text) { log(level.c_str(), "viewport", text); };
+	callbacks.log     = [this](const std::string& level, const std::string& text) {
+		if (level == "error")
+			++m_viewportErrors;   // スモークテスト: テンプレートのシェーダー / パイプラインが動くか
+		log(level.c_str(), "viewport", text);
+	};
 	callbacks.graphChanged = [this](uint64_t revision) { m_host.emit("graph.changed", { { "revision", revision } }); };
 	callbacks.viewer = [this](const ResourceViewer::Probe& p, const std::string& status) {
 		Json j = { { "status", status } };
@@ -698,6 +702,9 @@ void EditorApp::checkSmokeTest()
 		// ビューポートが描けるまで待つ
 		if (m_framesDrawn < m_options.smokeFrames)
 			return;
+		// テンプレートのグラフが、エラーなく描けている (シェーダーのコンパイル、パイプライン、マテリアル、ライト)
+		if (m_viewportErrors.load() > 0)
+			return finish(13, "テンプレートのプロジェクトの描画でエラーが出た (ログの viewport を見る)");
 		m_smokeStage = SmokeStage::Inspector;
 		runInspectorSelfCheck([this, finish](bool ok, const std::string& error) {
 			// 返答は描画スレッドから届くので、UI スレッドで続ける
@@ -902,13 +909,13 @@ void EditorApp::runShaderSelfCheck(std::function<void(bool ok, const std::string
 	});
 }
 
-// シーンの経路: 既定のシーン (49 個) が読めて、ビューポートの中央をクリックすると中央の立方体を選び、
+// シーンの経路: 既定のシーン (立方体 49 個 + 平行光源) が読めて、ビューポートの中央をクリックすると中央の立方体を選び、
 // scene.set で動かして edit.undo で戻せる
 void EditorApp::runSceneSelfCheck(std::function<void(bool ok, const std::string& error)> done)
 {
 	Bridge& b = m_host.bridge();
 	b.callLocal("scene.get", Json::object(), [this, done](int s1, const Json& r1) {
-		if (s1 != 0 || r1["scene"]["objects"].size() != 49)
+		if (s1 != 0 || r1["scene"]["objects"].size() != 50)
 			return done(false, "scene.get: " + r1.dump().substr(0, 300));
 		const Json original = r1["scene"];
 		const int cx = static_cast<int>(m_viewport.width() / 2), cy = static_cast<int>(m_viewport.height() / 2);
@@ -927,7 +934,7 @@ void EditorApp::runSceneSelfCheck(std::function<void(bool ok, const std::string&
 								if (s4 != 0 || r4.value("kind", std::string()) != "scene" || m_sceneData.objects.empty()
 								    || m_sceneData.objects[0].position[1] != 1.5f)
 									return done(false, "edit.undo (シーン): " + r4.dump());
-								log("info", "smoke", "scene: 49 個を読み、中央をクリックで選び、動かして元に戻した");
+								log("info", "smoke", "scene: 50 個 (立方体 49 + ライト) を読み、中央をクリックで選び、動かして元に戻した");
 								done(true, {});
 							});
 						});

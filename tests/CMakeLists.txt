@@ -53,6 +53,7 @@ add_executable(studio_tests_unit
     test_scene.cpp
     test_project_assets.cpp
     test_material.cpp
+    test_lights.cpp
 )
 target_link_libraries(studio_tests_unit PRIVATE studio_bridge studio_services studio_doctest studio_options)
 add_test(NAME unit COMMAND studio_tests_unit)

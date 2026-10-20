@@ -3,13 +3,16 @@
 //
 //    一覧   親子の木 (▸ で畳む)、目のボタンで表示 / 非表示、クリックで選ぶ (インスペクターで配置を編集。
 //           ビューポートには辺の印)。ビューポートをクリックしても選べる
-//    操作   ＋立方体 (選んでいる物と同じ親に加える)、複製、削除 (Delete キーでも)、保存 (● は保存していない変更)
+//    操作   ＋立方体 / ＋ライト (選んでいる物と同じ親に加える。ライトは M5-5)、複製、削除 (Delete キーでも)、保存 (● は保存していない変更)
 //  編集はシーン全体の JSON を scene.set で送る (元に戻す / やり直すが効く)。保存は scene.save。
 // ============================================================
 import { useEffect, useState } from 'react';
 import { call, isConnected } from '../bridge/client';
 import { errorText } from '../state/graph';
 import { assetName, assetOfModel } from '../state/library';
+import { lightParam, loadLightTypes, newLight } from '../state/light';
+import { lightTypeLabel } from '../inspector/LightEditor';
+import type { LightTypeInfo, SceneObjectJson } from '../bridge/protocol';
 import { addObject, applyScene, duplicateObject, loadScene, newObject, removeObject, sceneTree, toHex, updateObject } from '../state/scene';
 import { studioStore, useStudio } from '../state/store';
 
@@ -18,6 +21,11 @@ type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; text: string };
 export function ScenePanel() {
   const info = useStudio((s) => s.scene);
   const library = useStudio((s) => s.library);
+  const lightTypes = useStudio((s) => s.lightTypes);
+  useEffect(() => {
+    if (isConnected() && lightTypes.length === 0) void loadLightTypes();
+  }, [lightTypes.length]);
+  const lightColor = (o: SceneObjectJson) => lightParam(o, lightTypes.find((t) => t.id === o.light?.type), 'color');
   const modelLabel = (model: string) => {
     const a = assetOfModel(library, model);
     return a ? assetName(a.path) : model.startsWith('asset:') ? '(ないモデル)' : model.replace(/^builtin:/, '');
@@ -71,6 +79,10 @@ export function ScenePanel() {
   const rows = sceneTree(scene, collapsed);
   const selected = scene.objects.find((o) => o.id === selectedId);
 
+  const addLight = async (t: LightTypeInfo) => {
+    const l = newLight(scene, t, selected ? selected.parent : null);
+    if (await apply(`${l.name} を追加`, addObject(scene, l))) studioStore.select({ kind: 'object', id: l.id });
+  };
   const add = async () => {
     const obj = newObject(scene);
     if (selected) obj.parent = selected.parent;
@@ -106,6 +118,23 @@ export function ScenePanel() {
         <span className="muted">{scene.objects.length} 個</span>
         <span className="spacer" />
         <button onClick={() => void add()} title="立方体を加える (選んでいる物と同じ親に)">＋ 立方体</button>
+        <select
+          className="scene-add-light"
+          value=""
+          title="ライトを加える (選んでいる物と同じ親に。種類は lights/*.light.json)"
+          onFocus={() => void loadLightTypes()}
+          onChange={(e) => {
+            const t = lightTypes.find((x) => x.id === e.target.value);
+            if (t) void addLight(t);
+          }}
+        >
+          <option value="">＋ ライト</option>
+          {lightTypes.map((t) => (
+            <option key={t.id} value={t.id} disabled={!!t.error}>
+              {t.label}
+            </option>
+          ))}
+        </select>
         <button onClick={() => void duplicate()} disabled={!selected} title="選んでいる物を複製する">複製</button>
         <button onClick={() => void remove()} disabled={!selected} title="選んでいる物を消す (Delete)。子は親につなぎ直す">削除</button>
         <button onClick={() => void save()} title="シーンのファイルに書く">保存</button>
@@ -133,9 +162,12 @@ export function ScenePanel() {
             >
               {hasChildren ? (collapsed.has(obj.id) ? '▸' : '▾') : ''}
             </button>
-            <span className="scene-swatch" style={{ background: toHex(obj.color) }} />
+            <span
+              className={`scene-swatch${obj.light ? ' light' : ''}`}
+              style={{ background: toHex(obj.light ? lightColor(obj) : obj.color) }}
+            />
             <span className="scene-name">{obj.name || obj.id}</span>
-            <span className="scene-model muted">{modelLabel(obj.model)}</span>
+            <span className="scene-model muted">{obj.light ? `ライト: ${lightTypeLabel(lightTypes, obj.light.type)}` : modelLabel(obj.model)}</span>
             <button
               className="scene-eye"
               title={obj.visible ? '表示中 (クリックで隠す)' : '非表示 (クリックで表示)'}

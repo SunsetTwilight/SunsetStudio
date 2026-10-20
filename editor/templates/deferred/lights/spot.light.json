@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "label": "スポット",
+  "shape": "spot",
+  "params": [
+    { "name": "color",      "type": "color", "label": "色",                 "default": [1, 1, 1] },
+    { "name": "intensity",  "type": "float", "label": "強さ",               "default": 20, "min": 0 },
+    { "name": "range",      "type": "float", "label": "届く距離 (m)",       "default": 15, "min": 0.01 },
+    { "name": "innerAngle", "type": "float", "label": "内側の角度 (度)",    "default": 20, "min": 0, "max": 89 },
+    { "name": "outerAngle", "type": "float", "label": "外側の角度 (度)",    "default": 30, "min": 0, "max": 89 }
+  ]
+}

@@ -7,13 +7,15 @@
 //                       cbuffer Material の変数とテクスチャの変数 (描画スレッドのリフレクションから)
 //    material.set       ファイルを書き換える (元に戻す / やり直すの対象。保存はすぐ。描画にもすぐ反映する)
 //    material.create    新しいファイルを作る (取り込んだ値のマテリアルの中身を渡すと「マテリアルにする」になる)
+//    light.types        ライトの種類 (lights/*.light.json。M5-5)
 //  イベント: material.changed (ファイルが変わった)
-//  標準のマテリアル (pipelines/materials/standard.gbuffer.json とシェーダー) がないプロジェクト (M5-4 より前に作ったもの)
-//  には、開くときにテンプレートから足す (ensureMaterialSupport)。
+//  標準のマテリアル (pipelines/materials/standard.gbuffer.json とシェーダー) と標準のライトの種類 (lights/、M5-5) が
+//  ないプロジェクトには、開くときにテンプレートから足す (ensureMaterialSupport。あるファイルは上書きしない)。
 // ============================================================
 #include "EditorApp.h"
 
 #include "services/AssetFiles.h"
+#include "services/LightTypes.h"
 
 #include "gfx/rendergraph/GraphAsset.h"
 
@@ -37,7 +39,7 @@ void EditorApp::ensureMaterialSupport(const Project& project)
 	const std::filesystem::path root = project.assetRoot();
 	std::error_code ec;
 	std::vector<std::string> added;
-	for (const char* dir : { "pipelines/materials", "shaders/materials" })
+	for (const char* dir : { "pipelines/materials", "shaders/materials", "lights" })   // lights: M5-5 のライトの種類
 	{
 		const std::filesystem::path from = tmpl / pathFromUtf8(dir);
 		for (const auto& e : std::filesystem::directory_iterator(from, ec))
@@ -55,7 +57,7 @@ void EditorApp::ensureMaterialSupport(const Project& project)
 	std::filesystem::create_directories(root / "materials", ec);
 	if (!added.empty())
 	{
-		std::string text = "マテリアルに要るファイルをテンプレートから足しました:";
+		std::string text = "マテリアル / ライトに要るファイルをテンプレートから足しました:";
 		for (const auto& a : added) text += " " + a;
 		log("info", "material", text);
 	}
@@ -97,6 +99,38 @@ bool EditorApp::writeMaterialFile(const std::string& path, const Json& material,
 void EditorApp::registerMaterialMethods()
 {
 	Bridge& b = m_host.bridge();
+
+	// ライトの種類 (M5-5): lights/*.light.json。関数のファイル (.light.hlsl) がなければ error
+	b.registerMethod("light.types", [this](const Json&, Bridge::Reply r) {
+		if (!m_project)
+			return r.error(BridgeError::Unavailable, "プロジェクトを開いていません");
+		const std::filesystem::path dir = m_project->assetRoot() / "lights";
+		Json types = Json::array();
+		for (const std::string& rel : listAssetFiles(m_project->assetRoot(), "lights", { ".json" }))
+		{
+			const std::string file = rel.substr(rel.rfind('/') + 1);
+			const std::string tail = ".light.json";
+			if (file.size() <= tail.size() || file.compare(file.size() - tail.size(), tail.size(), tail) != 0)
+				continue;
+			const std::string id = file.substr(0, file.size() - tail.size());
+			LightTypeDef def;
+			LightTypeDiagnostics diag;
+			std::string text;
+			Json json;
+			bool ok = gfx::rg::readTextFile(m_project->assetRoot() / pathFromUtf8(rel), text);
+			if (ok)
+				try { json = Json::parse(text); } catch (const std::exception& e) { diag.errors.push_back(e.what()); ok = false; }
+			ok = ok && lightTypeFromJson(id, json, def, diag);
+			Json t = ok ? lightTypeToJson(def) : Json{ { "id", id }, { "label", id }, { "params", Json::array() } };
+			std::error_code ec;
+			if (!ok)
+				t["error"] = diag.errors.empty() ? std::string("読めません") : diag.errors.front();
+			else if (!std::filesystem::exists(dir / pathFromUtf8(id + ".light.hlsl"), ec))
+				t["error"] = "lights/" + id + ".light.hlsl (Light_" + id + " の関数) がありません";
+			types.push_back(std::move(t));
+		}
+		r.ok({ { "types", std::move(types) } });
+	});
 
 	b.registerMethod("material.list", [this](const Json&, Bridge::Reply r) {
 		if (!m_project)

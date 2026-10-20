@@ -2,6 +2,7 @@
 //  インスペクター: シーンの物体 (M5-2)
 //
 //  名前、モデル (立方体か、ライブラリのモデル、M5-3)、親、位置 / 回転 (度。X → Y → Z の順) / 大きさ、表示、
+//  ライトの物体 (M5-5) はモデル / 色 / マテリアルの代わりにライトの欄 (LightEditor)。
 //  色 (マテリアルの色に掛ける)、スロットごとのマテリアル (M5-4。取り込んだ値 / materials/ のファイル。
 //  「マテリアルにする」で取り込んだ値をファイルに書き出して割り当てる。「開く」でマテリアルのタブ)。
 //  変えるとシーン全体の JSON を scene.set で送る (元に戻す / やり直すが効く。保存はシーンのパネル)。
@@ -16,6 +17,7 @@ import { autoMaterialKey, loadMaterialFiles, newMaterialPath, objectSlots, withA
 import { applyScene, fromHex, parentCandidates, toHex, updateObject } from '../state/scene';
 import { useStudio } from '../state/store';
 import { NameBox, NumberBox } from './GraphEditors';
+import { LightEditor } from './LightEditor';
 
 type Vec3 = [number, number, number];
 
@@ -49,6 +51,10 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
     } catch (e) {
       setStatus({ kind: 'error', text: errorText(e) });
     }
+  };
+  const applyWhole = async (next: SceneJson, label: string) => {
+    const err = await applyScene(next, `${obj.name}: ${label}`);
+    setStatus(err ? { kind: 'error', text: err } : { kind: 'ok', text: label });
   };
   const set = async (patch: Partial<SceneObjectJson>, label: string) => {
     const err = await applyScene(updateObject(scene, id, patch), `${obj.name}: ${label}`);
@@ -89,6 +95,8 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
         <span className="form-label">id</span>
         <span className="form-control muted">{obj.id}</span>
       </div>
+      {!obj.light && (
+        <>
       <div className="form-row">
         <span className="form-label">モデル</span>
         <span className="form-control">
@@ -108,6 +116,8 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
       {current?.model?.status === 'loading' && <div className="inspector-status busy">モデルを読み込んでいます…</div>}
       {current?.model?.status === 'error' && <div className="inspector-status error">{current.model.error}</div>}
       {current?.missing && <div className="inspector-status error">モデルの元のファイルがありません: {current.path}</div>}
+        </>
+      )}
       <div className="form-row">
         <span className="form-label">親</span>
         <span className="form-control">
@@ -130,6 +140,10 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
           <input type="checkbox" checked={obj.visible} onChange={(e) => void set({ visible: e.target.checked }, e.target.checked ? '表示' : '非表示')} />
         </span>
       </div>
+      {obj.light ? (
+        <LightEditor scene={scene} obj={obj} apply={applyWhole} />
+      ) : (
+        <>
       <div className="form-row">
         <span className="form-label" title="マテリアルの色に掛ける色 (同じモデルを 1 体ずつ色違いにする)">色 (掛ける)</span>
         <span className="form-control">
@@ -168,6 +182,8 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
           </div>
         );
       })}
+        </>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ cbuffer Object : register(b0)
 {
 	float4x4 gWorld;
 	float4   gColor;
+	uint4    gLightMask;   // x = ライトリンクのマスク (G-Buffer の gbLightMask に書く。M5-5)
 };
 
 cbuffer Frame : register(b1)

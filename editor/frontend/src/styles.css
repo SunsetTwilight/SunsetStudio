@@ -1409,3 +1409,41 @@ button.link:disabled {
   font-size: 12px;
   padding: 4px 8px;
 }
+
+/* ---- ライト (M5-5) ---- */
+.scene-swatch.light {
+  border-radius: 50%;
+}
+.scene-add-light {
+  max-width: 96px;
+}
+.light-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.light-link-list {
+  max-height: 140px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.light-link-list label,
+.light-link-all {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* シーンのパネルは操作が多いので、狭いときは見出しを折り返す (ボタンを隠さない) */
+.scene-panel .panel-header {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  gap: 6px;
+}
+.scene-panel .panel-header .spacer {
+  flex: 1 0 0;
+}

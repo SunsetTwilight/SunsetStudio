@@ -1,11 +1,13 @@
 // 標準のマテリアル: G-Buffer に書く
 //   gbAlbedo: rgb = 基本色、a = 金属度 / gbNormal: xyz = ワールドの法線 ([0, 1] にしたもの)、w = 粗さ
+//   gbLightMask: 物体のライトリンクのマスク (M5-5)
 #include "standard.hlsli"
 
 struct MRT
 {
 	float4 albedo : SV_Target0;
 	float4 normal : SV_Target1;
+	uint   mask   : SV_Target2;
 };
 
 MRT main(VSOut i)
@@ -25,5 +27,6 @@ MRT main(VSOut i)
 	MRT o;
 	o.albedo = float4(base.rgb, saturate(metallic * mr.b));
 	o.normal = float4(n * 0.5 + 0.5, saturate(roughness * mr.g));
+	o.mask   = gLightMask.x;
 	return o;
 }

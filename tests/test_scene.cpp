@@ -39,14 +39,14 @@ SceneObject obj(const char* id, std::array<float, 3> pos, const char* parent = "
 TEST_CASE("シーン: JSON の読み書きと診断")
 {
 	SceneDesc s = defaultScene();
-	CHECK(s.objects.size() == 49);
+	CHECK(s.objects.size() == 50);   // 立方体 49 個 + 平行光源
 	CHECK(s.objects[0].id == "center");
 	s.editor = { { "camera", 1 } };
 	SceneDesc back;
 	SceneDiagnostics diag;
 	REQUIRE(sceneFromJson(sceneToJson(s), back, diag));
 	CHECK(diag.warnings.empty());
-	CHECK(back.objects.size() == 49);
+	CHECK(back.objects.size() == 50);
 	CHECK(back.objects[0].scale == std::array<float, 3>{ 3, 3, 3 });
 	CHECK(back.editor["camera"] == 1);
 	CHECK(sceneToJson(back)["objects"][0]["parent"].is_null());
@@ -108,6 +108,7 @@ TEST_CASE("シーン: ローカル / ワールドの行列と、見えるか")
 TEST_CASE("シーン: クリックの選択 (光線と箱)")
 {
 	SceneDesc s = defaultScene();
+	s.objects.pop_back();   // 平行光源 (y = 8 の上にある) は外す。ライトの選択の箱はビューポートが決める
 	const auto w = worldMatrices(s);
 	// 真上から中央へ: 中央の大きな立方体
 	CHECK(pickObject(s, w, { 0, 20, 0 }, { 0, -1, 0 }) == 0);

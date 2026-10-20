@@ -14,6 +14,7 @@
 //  描画スレッドだけが使う。
 // ============================================================
 
+#include "LightSystem.h"
 #include "MaterialSystem.h"
 #include "ModelCache.h"
 #include "OrbitCamera.h"
@@ -71,6 +72,7 @@ public:
 	void setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model,
 	              const std::vector<MaterialDesc>* slotMaterials = nullptr);
 	MaterialSystem& materials() { return m_materials; }
+	LightSystem&    lights()    { return m_lights; }
 	// 取り込んだ値のマテリアルのキー
 	static std::string  autoMaterialKey(const std::string& modelId, size_t slot);
 	static MaterialDesc standardMaterial(const std::array<float, 4>& baseColor, float metallic, float roughness);
@@ -117,6 +119,7 @@ private:
 		Mat4                  world;
 		Mat4                  box;   // 選択の判定と印の箱 (単位の箱をワールドへ)
 		std::vector<DrawItem> draws;
+		bool                  light = false;   // ライトの物体 (描かず、印を描く。M5-5)
 	};
 	static void releaseDraws(GraphicsEngine& engine, Object& o, size_t keep);
 	void updateObjects(GraphicsEngine& engine);   // m_sceneDesc と m_models から m_objects を作り直す
@@ -139,6 +142,8 @@ private:
 	std::vector<Object> m_objects;
 	ModelCache          m_models;
 	MaterialSystem      m_materials;
+	LightSystem         m_lights;
+	Float3              m_sunDirection { -0.396f, -0.880f, -0.264f };   // フレームの gLightDir (最初の平行光源。古いシェーダー用)
 	GraphicsEngine*     m_engine = nullptr;   // draw の中で使う (init から shutdown まで)
 	size_t              m_reportedPipelineErrors = 0;
 	size_t              m_reportedExecutorErrors = 0;

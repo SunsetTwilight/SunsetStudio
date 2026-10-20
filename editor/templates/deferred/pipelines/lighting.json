@@ -8,10 +8,11 @@
   "layout": {
     "parameters": [
       { "parameterType": "CBV", "shaderRegister": 1 },
-      { "parameterType": "DescriptorTable", "shaderVisibility": "Pixel", "firstRange": 0, "numRanges": 1 }
+      { "parameterType": "DescriptorTable", "shaderVisibility": "Pixel", "firstRange": 0, "numRanges": 1 },
+      { "parameterType": "CBV", "shaderRegister": 2 }
     ],
-    "numParameters": 2,
-    "ranges": [ { "rangeType": "SRV", "numDescriptors": 3, "flags": [ "DescriptorsVolatile" ] } ],
+    "numParameters": 3,
+    "ranges": [ { "rangeType": "SRV", "numDescriptors": 4, "flags": [ "DescriptorsVolatile" ] } ],
     "numRanges": 1
   },
   "state": {

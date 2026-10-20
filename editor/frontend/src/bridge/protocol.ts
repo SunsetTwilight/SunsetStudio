@@ -170,6 +170,28 @@ export interface SceneObjectJson {
   visible: boolean;
   color: [number, number, number, number]; // マテリアルの色に掛ける色
   materials?: Record<string, string>; // スロット → マテリアルのファイル (書いていないスロットは取り込んだ値。M5-4)
+  light?: SceneLightJson; // あればライト (モデルは描かない。M5-5)
+}
+export interface SceneLightJson {
+  type: string; // lights/<種類>.light.json
+  params: Record<string, JsonValue>; // 書いていない値は種類の既定値
+  links?: string[]; // 照らす物体の id (子も含む。なければすべて)
+}
+// ライトの種類 (M5-5)
+export interface LightParamInfo {
+  name: string;
+  label: string;
+  type: 'float' | 'float2' | 'float3' | 'float4' | 'color';
+  default: number | number[];
+  min?: number;
+  max?: number;
+}
+export interface LightTypeInfo {
+  id: string;
+  label: string;
+  shape?: string;
+  params: LightParamInfo[];
+  error?: string; // 定義を読めない / 関数のファイルがない
 }
 export interface SceneJson {
   version: number;
@@ -385,6 +407,7 @@ export interface Methods {
   'library.reimport': { params: { id: string }; result: { id: string } };
   'library.load': { params: { id: string }; result: { id: string; status: string } };
   'material.list': { params: Record<string, never>; result: { files: string[] } };
+  'light.types': { params: Record<string, never>; result: { types: LightTypeInfo[] } };
   'material.describe': { params: { key: string }; result: MaterialInfo };
   'material.set': { params: { path: string; material: MaterialJson; label?: string }; result: { path: string } };
   'material.create': { params: { path: string; material?: MaterialJson }; result: { path: string } };

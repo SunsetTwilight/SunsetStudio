@@ -75,6 +75,13 @@ Json sceneToJson(const SceneDesc& s)
 		};
 		if (!o.materials.empty())
 			j["materials"] = o.materials;
+		if (o.light)
+		{
+			Json l = { { "type", o.light->type }, { "params", o.light->params.is_object() ? o.light->params : Json::object() } };
+			if (!o.light->links.empty())
+				l["links"] = o.light->links;
+			j["light"] = std::move(l);
+		}
 		objects.push_back(std::move(j));
 	}
 	Json j = { { "version", s.version }, { "objects", objects } };
@@ -144,12 +151,42 @@ bool sceneFromJson(const Json& json, SceneDesc& out, SceneDiagnostics& diag)
 								o.materials[slot] = path.get<std::string>();
 						}
 					}
+					else if (k == "light")
+					{
+						if (!x.is_object()) { diag.errors.push_back(at + ".light: オブジェクトが必要です"); continue; }
+						SceneLight l;
+						for (const auto& [lk, lv] : x.items())
+						{
+							if (lk == "type")
+							{
+								if (lv.is_string() && !lv.get<std::string>().empty()) l.type = lv.get<std::string>();
+								else diag.errors.push_back(at + ".light.type: ライトの種類 (文字列) が必要です");
+							}
+							else if (lk == "params")
+							{
+								if (lv.is_object()) l.params = lv;
+								else diag.errors.push_back(at + ".light.params: オブジェクトが必要です");
+							}
+							else if (lk == "links")
+							{
+								if (!lv.is_array()) { diag.errors.push_back(at + ".light.links: 物体の id の配列が必要です"); continue; }
+								for (const Json& id : lv)
+								{
+									if (id.is_string()) l.links.push_back(id.get<std::string>());
+									else diag.errors.push_back(at + ".light.links: 文字列が必要です");
+								}
+							}
+							else
+								diag.warnings.push_back(at + ".light." + lk + ": 知らないキーなので無視します");
+						}
+						o.light = std::move(l);
+					}
 					else if (k == "layer") {}   // M5-2 の仮の項目 (M5-4 でマテリアルパスに置き換えた)。読み飛ばす
 					else diag.warnings.push_back(at + "." + k + ": 知らないキーなので無視します");
 				}
 				if (!validId(o.id))
 					diag.errors.push_back(at + ".id: 英数字と - _ . の 1〜64 文字が必要です (" + o.id + ")");
-				if (o.model != "builtin:cube" && !assetIdOfModel(o.model))
+				if (!o.light && o.model != "builtin:cube" && !assetIdOfModel(o.model))
 					diag.warnings.push_back(at + ".model: 知らないモデル (" + o.model + ")。builtin:cube か asset:<ID> を描きます");
 				s.objects.push_back(std::move(o));
 			}
@@ -275,7 +312,86 @@ SceneDesc defaultScene()
 			o.color    = { c[0], c[1], c[2], 1 };
 			s.objects.push_back(std::move(o));
 		}
+	// 今までの固定の光 (向き (-0.45, -1, -0.3)、色 (1, 0.96, 0.9)) と同じ平行光源
+	SceneObject sun;
+	sun.id       = "sun";
+	sun.name     = "Sun";
+	sun.model    = "";
+	sun.position = { 0, 8, 0 };
+	sun.rotation = { -61.6f, 56.3f, 0 };
+	SceneLight light;
+	light.type   = "directional";
+	light.params = { { "color", { 1.0, 0.96, 0.9 } }, { "intensity", 1.0 } };
+	sun.light    = std::move(light);
+	s.objects.push_back(std::move(sun));
 	return s;
+}
+
+LightLinks computeLightLinks(const SceneDesc& scene)
+{
+	LightLinks out;
+	const size_t n = scene.objects.size();
+	out.objectMasks.assign(n, 0);
+	out.lightMasks.assign(n, 0);
+	std::unordered_map<std::string, size_t> index;
+	for (size_t i = 0; i < n; ++i)
+		index[scene.objects[i].id] = i;
+	// 物体 i が id (やその子孫) に含まれるか: 親をたどる
+	auto within = [&](size_t i, const std::string& root) {
+		std::string cur = scene.objects[i].id;
+		for (size_t guard = 0; guard <= n && !cur.empty(); ++guard)
+		{
+			if (cur == root)
+				return true;
+			const auto it = index.find(cur);
+			if (it == index.end())
+				break;
+			cur = scene.objects[it->second].parent;
+		}
+		return false;
+	};
+	uint32_t next = 0;
+	for (size_t li = 0; li < n; ++li)
+	{
+		const SceneObject& lo = scene.objects[li];
+		if (!lo.light)
+			continue;
+		if (lo.light->links.empty())
+		{
+			out.lightMasks[li] = k_LightMaskAll;
+			continue;
+		}
+		for (const auto& id : lo.light->links)
+			if (!index.count(id))
+				out.warnings.push_back(lo.id + ": ライトリンクの物体 '" + id + "' がありません");
+		if (next >= 32)
+		{
+			out.lightMasks[li] = k_LightMaskAll;
+			out.warnings.push_back(lo.id + ": ライトリンクは 32 個のライトまでです。このライトはすべての物体を照らします");
+			continue;
+		}
+		const uint32_t bit = 1u << next++;
+		out.lightMasks[li] = bit;
+		for (size_t i = 0; i < n; ++i)
+			if (!scene.objects[i].light)
+				for (const auto& id : lo.light->links)
+					if (within(i, id))
+					{
+						out.objectMasks[i] |= bit;
+						break;
+					}
+	}
+	return out;
+}
+
+std::array<float, 3> lightDirection(const Matrix& m)
+{
+	std::array<float, 3> d = { -m[8], -m[9], -m[10] };   // 3 列目 (ローカルの Z) の反対
+	const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+	if (len <= 1e-12f)
+		return { 0, -1, 0 };
+	for (float& x : d) x /= len;
+	return d;
 }
 
 std::string uniqueObjectId(const SceneDesc& scene, const std::string& prefix)

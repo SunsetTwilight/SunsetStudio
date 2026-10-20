@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "label": "ポイント",
+  "shape": "point",
+  "params": [
+    { "name": "color",     "type": "color", "label": "色",               "default": [1, 1, 1] },
+    { "name": "intensity", "type": "float", "label": "強さ",             "default": 10, "min": 0 },
+    { "name": "range",     "type": "float", "label": "届く距離 (m)",     "default": 10, "min": 0.01 }
+  ]
+}

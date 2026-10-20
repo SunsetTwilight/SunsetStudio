@@ -39,6 +39,8 @@ add_library(studio_services STATIC
     src/services/ProjectAssets.cpp
     src/services/Material.h           # マテリアルのファイルと、パラメーターの詰め方 (M5-4)
     src/services/Material.cpp
+    src/services/LightTypes.h         # ライトの種類 (定義、値の詰め方、hlsli の生成。M5-5)
+    src/services/LightTypes.cpp
 )
 target_include_directories(studio_services PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(studio_services
@@ -76,6 +78,8 @@ add_executable(SunsetEditor
     src/render/ModelCache.cpp
     src/render/MaterialSystem.h
     src/render/MaterialSystem.cpp
+    src/render/LightSystem.h
+    src/render/LightSystem.cpp
     src/viewport/ViewportWindow.h
     src/viewport/ViewportWindow_win32.cpp
     src/viewport/FloatingWindow.h

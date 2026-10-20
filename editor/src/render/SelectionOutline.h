@@ -23,8 +23,9 @@ public:
 	bool init(GraphicsEngine& engine, std::string& error);
 	void shutdown(GraphicsEngine& engine);
 
-	// rt (w x h) に、viewProj × world の箱の辺を描く
-	void record(ICommandBuffer* cb, IRenderTarget* rt, uint32_t w, uint32_t h, const Mat4& viewProj, const Mat4& world);
+	// rt (w x h) に、viewProj × world の箱の辺を描く。color が nullptr なら橙 (選択の色)
+	void record(ICommandBuffer* cb, IRenderTarget* rt, uint32_t w, uint32_t h, const Mat4& viewProj, const Mat4& world,
+	            const float* color = nullptr);
 
 private:
 	ShaderHandle        m_vs, m_ps;

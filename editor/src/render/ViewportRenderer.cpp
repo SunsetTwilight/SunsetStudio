@@ -27,8 +27,9 @@ struct FrameConstants
 // assets/shaders/common.hlsli の Object と合わせる
 struct ObjectConstants
 {
-	Mat4  world;
-	float color[4];
+	Mat4     world;
+	float    color[4];
+	uint32_t lightMask[4];   // x = ライトリンクのマスク (M5-5。G-Buffer に書く)
 };
 
 // 面ごとに法線の違う 24 頂点の立方体 (-0.5〜0.5)。UV は面ごとに 0〜1、接線は u の向き
@@ -68,6 +69,13 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 	m_pipelines->setRoot(assetRoot);
 	m_executor  = std::make_unique<gfx::rg::Executor>(engine, *m_pipelines);
 	m_options.bindingLayout = [this](const std::string& p) { return m_pipelines->bindingLayout(p); };
+
+	// ライトの種類 (M5-5): Lighting シェーダーが include する shaders/generated/lights.hlsli を先に書く
+	{
+		std::string lightError;
+		if (!m_lights.init(engine, assetRoot, lightError))
+			m_viewerError += (m_viewerError.empty() ? "" : "\n") + lightError;
+	}
 
 	m_graph = std::make_unique<gfx::rg::GraphAsset>(assetRoot / gfx::rg::pathFromUtf8(graphFile));
 	if (!m_graph->load(m_options))
@@ -132,6 +140,7 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 	m_objects.clear();
 	m_models.clear(engine);
 	m_materials.shutdown(engine);
+	m_lights.shutdown(engine);
 	m_engine = nullptr;
 	engine.destroyBuffer(m_vb);
 	engine.destroyBuffer(m_ib);
@@ -153,8 +162,9 @@ ViewportRenderer::PollResult ViewportRenderer::pollAssets()
 		r.graphRecompiled = m_graph->recompile(m_options);
 		r.graphFailed     = m_graph->lastFailed();
 	}
-	// マテリアルのファイルの変更と、パイプラインが変わったときのリフレクションの調べ直し
+	// マテリアルのファイルの変更と、パイプラインが変わったときのリフレクションの調べ直し。ライトの種類の変更
 	m_materials.poll();
+	m_lights.poll();
 	if (!pr.reloaded.empty())
 		m_materials.invalidateShaders();
 	if (r.graphReloaded || r.graphRecompiled || r.graphFailed)
@@ -174,6 +184,8 @@ std::vector<std::string> ViewportRenderer::takeNewErrors()
 	if (!m_pipelines || !m_executor)
 		return out;
 	for (auto& e : m_materials.takeErrors())
+		out.push_back(std::move(e));
+	for (auto& e : m_lights.takeErrors())
 		out.push_back(std::move(e));
 	const auto& pe = m_pipelines->errors();
 	for (; m_reportedPipelineErrors < pe.size(); ++m_reportedPipelineErrors)
@@ -209,8 +221,8 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 	fc.invViewProj = Mat4::inverse(fc.viewProj);
 	const Float3 eye = camera.eye();
 	fc.cameraPos[0] = eye.x; fc.cameraPos[1] = eye.y; fc.cameraPos[2] = eye.z; fc.cameraPos[3] = 1;
-	const Float3 light = normalize({ -0.45f, -1.0f, -0.30f });
-	fc.lightDir[0] = light.x; fc.lightDir[1] = light.y; fc.lightDir[2] = light.z; fc.lightDir[3] = 0;
+	// 最初の平行光源の向き (ライトの定数を使わない古いシェーダー用。ライトがなければ今までの向き)
+	fc.lightDir[0] = m_sunDirection.x; fc.lightDir[1] = m_sunDirection.y; fc.lightDir[2] = m_sunDirection.z; fc.lightDir[3] = 0;
 	fc.viewportSize[0] = static_cast<float>(width);
 	fc.viewportSize[1] = static_cast<float>(height);
 	fc.viewportSize[2] = 1.0f / static_cast<float>(width);
@@ -228,11 +240,18 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 		return;
 	cb->begin();
 	m_executor->record(cb, m_graph->desc(), m_graph->compiled(), in);
-	// 選んでいる物体の印 (リソースビューアーで別のものを表示しているときは描かない)
-	if (m_outlineOk && !m_selection.empty() && !(m_viewerOk && m_viewer.settings().enabled))
+	// ライトの印 (薄い黄) と、選んでいる物体の印 (橙)。リソースビューアーで別のものを表示しているときは描かない
+	if (m_outlineOk && !(m_viewerOk && m_viewer.settings().enabled))
+	{
+		static const float lightColor[4] = { 0.95f, 0.85f, 0.35f, 1.0f };
 		for (const Object& o : m_objects)
-			if (o.id == m_selection && o.visible)
-				m_outline.record(cb, rt, width, height, fc.viewProj, o.box);
+			if (o.light && o.visible && o.id != m_selection)
+				m_outline.record(cb, rt, width, height, fc.viewProj, o.box, lightColor);
+		if (!m_selection.empty())
+			for (const Object& o : m_objects)
+				if (o.id == m_selection && o.visible)
+					m_outline.record(cb, rt, width, height, fc.viewProj, o.box);
+	}
 	if (m_viewerOk)
 		m_viewer.record(engine, cb, *m_executor, rt, width, height, cursorX, cursorY, camera.zNear(), camera.zFar());
 	cb->end();
@@ -298,6 +317,9 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 	const SceneDesc&          scene   = m_sceneDesc;
 	const std::vector<Matrix> world   = worldMatrices(scene);
 	const std::vector<bool>   visible = effectiveVisibility(scene);
+	const LightLinks          links   = computeLightLinks(scene);
+	std::vector<LightSystem::Light> lights;
+	bool sunFound = false;
 	// 定数バッファは使い回し、足りなければ作り、余れば消す (エンジンが GPU の使い終わりまで解放を遅らせる)
 	while (m_objects.size() > scene.objects.size())
 	{
@@ -312,7 +334,33 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 		o.id      = so.id;
 		o.visible = visible[i];
 		std::copy(world[i].begin(), world[i].end(), o.world.m);
-		o.box = o.world;
+		o.box   = o.world;
+		o.light = so.light.has_value();
+
+		// ライト (M5-5): 描かず、印の箱 (0.5) と、ライトの定数に入れる
+		if (so.light)
+		{
+			releaseDraws(engine, o, 0);
+			o.box = o.world * Mat4::translateScale({ 0, 0, 0 }, { 0.5f, 0.5f, 0.5f });
+			if (visible[i])
+			{
+				const auto d = lightDirection(world[i]);
+				LightSystem::Light l;
+				l.type      = so.light->type;
+				l.position  = { o.world.m[12], o.world.m[13], o.world.m[14] };
+				l.direction = { d[0], d[1], d[2] };
+				l.params    = so.light->params;
+				l.mask      = links.lightMasks[i];
+				lights.push_back(std::move(l));
+				const LightTypeDef* t = m_lights.type(so.light->type);
+				if (!sunFound && t && (t->shape == "directional" || t->id == "directional"))
+				{
+					m_sunDirection = { d[0], d[1], d[2] };
+					sunFound = true;
+				}
+			}
+			continue;
+		}
 
 		// 描くもの: 立方体は 1 つ (スロット "Default")、モデルは (ノード, サブメッシュ) ごと
 		struct Want
@@ -365,10 +413,17 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 			ObjectConstants c;
 			c.world = w.world;
 			std::copy(so.color.begin(), so.color.end(), c.color);
+			c.lightMask[0] = links.objectMasks[i];
+			c.lightMask[1] = c.lightMask[2] = c.lightMask[3] = 0;
 			if (d.cb.valid())
 				engine.updateBuffer(d.cb, &c, sizeof(c));
 		}
 	}
+	if (!sunFound)
+		m_sunDirection = normalize({ -0.45f, -1.0f, -0.30f });
+	for (const auto& w : links.warnings)
+		m_viewerError += (m_viewerError.empty() ? "" : "\n") + w;
+	m_lights.setLights(std::move(lights));
 }
 
 std::string ViewportRenderer::pick(int x, int y, uint32_t width, uint32_t height, const OrbitCamera& camera) const
@@ -497,6 +552,10 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 
 BufferHandle ViewportRenderer::constants(const std::string& source, const gfx::rg::DrawContext&)
 {
-	return source == "frame" ? m_frameCB : BufferHandle{};   // "object" は draw の中でオブジェクトごとにつなぐ
+	if (source == "frame")
+		return m_frameCB;
+	if (source == "lights" && m_engine)   // M5-5: シーンのライト (cbuffer Lights)
+		return m_lights.constants(*m_engine);
+	return {};   // "object" は draw の中でオブジェクトごとにつなぐ
 }
 } // namespace studio

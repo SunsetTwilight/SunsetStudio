@@ -22,6 +22,7 @@
 //             window.devTools                                                  (UI が描くタイトルバー)
 //             asset.list / asset.read / asset.write / asset.templates / asset.create / asset.openExternal /
 //             shader.compile / shader.usages / shader.status                   (シェーダー / パイプラインの編集、M4)
+//             material.list / material.describe / material.set / material.create / light.types (M5-4 / M5-5)
 //             library.list / library.import / library.refresh / library.reimport / library.load
 //                                                                              (アセットのライブラリ、M5-3)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
@@ -160,6 +161,7 @@ private:
 	RenderThread::InitResult m_engineInfo;
 
 	std::atomic<uint32_t> m_d3dProblems { 0 };   // D3D12 のエラー / 警告の数 (スモークテストで確認する)
+	std::atomic<uint32_t> m_viewportErrors { 0 };   // 描画のエラーのログの数 (スモークテストで、最初のフレームまでに 0 か確認する)
 
 	// スモークテストの進み具合 (UI スレッドだけが触る)
 	bool     m_uiReady       = false;
