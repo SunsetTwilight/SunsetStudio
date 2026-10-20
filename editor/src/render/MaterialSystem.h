@@ -61,9 +61,11 @@ public:
 		std::vector<GfxDescriptor> textures;    // テクスチャの表 (なければ空)
 		uint32_t                   numParams = 0;   // パイプラインのルートパラメーターの数 (約束の番号があるか)
 	};
-	// 描く前の準備。パイプラインを作れない / マテリアルを読めないなら false (理由は takeErrors)
+	// 描く前の準備。マテリアルがそのパスのパイプラインを持たなければ fallbackPipeline (描画ノードのパイプライン。
+	// 空なら描かない) で描き、マテリアルの値とテクスチャは変数の名前で合わせる。
+	// パイプラインを作れない / マテリアルを読めないなら false (理由は takeErrors)
 	bool prepare(GraphicsEngine& engine, const std::string& key, const std::string& pass, const gfx::rg::PipelineTargets& targets,
-	             Bound& out);
+	             Bound& out, const std::string& fallbackPipeline = {});
 
 	// UI 用の説明: { key, ok, error?, material (JSON), passes: { pass: { pipeline, cbuffer: [変数], textures: [変数] } } }
 	Json describe(GraphicsEngine& engine, const std::string& key);

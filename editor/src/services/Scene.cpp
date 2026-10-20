@@ -91,6 +91,10 @@ Json sceneToJson(const SceneDesc& s)
 		}
 		if (!o.castShadow)
 			j["castShadow"] = false;
+		if (o.layers)
+			j["layers"] = *o.layers;
+		if (!o.slotLayers.empty())
+			j["slotLayers"] = o.slotLayers;
 		objects.push_back(std::move(j));
 	}
 	Json j = { { "version", s.version }, { "objects", objects } };
@@ -207,6 +211,29 @@ bool sceneFromJson(const Json& json, SceneDesc& out, SceneDiagnostics& diag)
 						o.light = std::move(l);
 					}
 					else if (k == "castShadow") { if (x.is_boolean()) o.castShadow = x.get<bool>(); else diag.errors.push_back(at + ".castShadow: 真偽値が必要です"); }
+					else if (k == "layers" || k == "slotLayers")
+					{
+						// 名前の配列 (空の文字列は不可)
+						auto names = [&](const Json& a, const std::string& where, std::vector<std::string>& dst) {
+							if (!a.is_array()) return void(diag.errors.push_back(where + ": 描画レイヤーの名前の配列が必要です"));
+							for (const Json& n : a)
+							{
+								if (n.is_string() && !n.get<std::string>().empty()) dst.push_back(n.get<std::string>());
+								else diag.errors.push_back(where + ": 空でない文字列が必要です");
+							}
+						};
+						if (k == "layers")
+						{
+							std::vector<std::string> list;
+							names(x, at + ".layers", list);
+							o.layers = std::move(list);
+						}
+						else if (!x.is_object())
+							diag.errors.push_back(at + ".slotLayers: オブジェクト ({ スロット: [レイヤー] }) が必要です");
+						else
+							for (const auto& [slot, a] : x.items())
+								names(a, at + ".slotLayers." + slot, o.slotLayers[slot]);
+					}
 					else if (k == "layer") {}   // M5-2 の仮の項目 (M5-4 でマテリアルパスに置き換えた)。読み飛ばす
 					else diag.warnings.push_back(at + "." + k + ": 知らないキーなので無視します");
 				}
@@ -307,6 +334,15 @@ std::vector<bool> effectiveVisibility(const SceneDesc& scene)
 		out.push_back(v);
 	}
 	return out;
+}
+
+std::vector<std::string> drawLayersOf(const SceneObject& o, const std::string& slot)
+{
+	if (const auto it = o.slotLayers.find(slot); it != o.slotLayers.end())
+		return it->second;
+	if (o.layers)
+		return *o.layers;
+	return { k_DefaultDrawLayer };
 }
 
 SceneDesc defaultScene()

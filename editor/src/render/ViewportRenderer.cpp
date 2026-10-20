@@ -16,6 +16,7 @@ const char* k_CubeMaterial   = "auto:cube";
 const char* k_ShadowFallback = "auto:shadow";   // Shadow パスを持たないマテリアルの物体を、影に描くとき
 const char* k_ShadowPass     = "Shadow";        // 影のマテリアルパス (グラフの Shadow パスの drawList の layer)
 const char* k_StandardShadowPipeline = "pipelines/materials/standard.shadow.json";
+const char* k_GridLayer      = "Grid";          // エディターのグリッド (物体は描かない)
 
 // assets/shaders/common.hlsli の Frame と合わせる
 struct FrameConstants
@@ -117,6 +118,10 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 		m_outlineOk = m_outline.init(engine, outlineError);
 		if (!m_outlineOk)
 			m_viewerError += (m_viewerError.empty() ? "" : "\n") + outlineError;
+		std::string overlayError;
+		m_unassignedOk = m_unassigned.init(engine, overlayError);
+		if (!m_unassignedOk)
+			m_viewerError += (m_viewerError.empty() ? "" : "\n") + overlayError;
 	}
 	// ---- マテリアル (M5-4)。立方体は白の標準のマテリアル (物体の色を掛ける) ----
 	m_engine = &engine;
@@ -143,6 +148,8 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 	m_viewerOk = false;
 	m_outline.shutdown(engine);
 	m_outlineOk = false;
+	m_unassigned.shutdown(engine);
+	m_unassignedOk = false;
 	m_sceneDesc = {};
 	m_selection.clear();
 	for (auto& o : m_objects)
@@ -261,6 +268,23 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 		return;
 	cb->begin();
 	m_executor->record(cb, m_graph->desc(), m_graph->compiled(), in);
+	// どの描画ノードにも入らないメッシュ (レイヤーが空か、グラフにないレイヤーだけ) をピンクで重ねる
+	if (m_unassignedOk && !(m_viewerOk && m_viewer.settings().enabled))
+	{
+		std::vector<std::string> graphLayers;
+		for (const auto& p : m_graph->desc().passes)
+			if (p.enabled && p.content.kind == gfx::rg::ContentKind::DrawList && p.content.drawList.layer != k_ShadowPass &&
+			    p.content.drawList.layer != k_GridLayer)
+				graphLayers.push_back(p.content.drawList.layer);
+		std::vector<UnassignedOverlay::Mesh> pink;
+		for (const Object& o : m_objects)
+			if (o.visible && !o.light)
+				for (const DrawItem& d : o.draws)
+					if (std::none_of(d.layers.begin(), d.layers.end(), [&](const std::string& l) {
+						    return std::find(graphLayers.begin(), graphLayers.end(), l) != graphLayers.end(); }))
+						pink.push_back({ d.vb, d.ib, d.indexFormat, d.indexCount, d.indexOffset, d.world });
+		m_unassigned.record(engine, cb, rt, width, height, fc.viewProj, pink);
+	}
 	// ライトの印 (薄い黄) と、選んでいる物体の印 (橙)。リソースビューアーで別のものを表示しているときは描かない
 	if (m_outlineOk && !(m_viewerOk && m_viewer.settings().enabled))
 	{
@@ -403,6 +427,7 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 			uint32_t     count = 0, offset = 0;
 			Mat4         world;
 			std::string  material;
+			std::vector<std::string> layers;
 		};
 		std::vector<Want> wants;
 		auto assigned = [&](const std::string& slot) -> std::string {
@@ -412,7 +437,8 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 		if (so.model == "builtin:cube")
 		{
 			const std::string m = assigned("Default");
-			wants.push_back({ m_vb, m_ib, GfxFormat::R16_Uint, 36, 0, o.world, m.empty() ? std::string(k_CubeMaterial) : m });
+			wants.push_back({ m_vb, m_ib, GfxFormat::R16_Uint, 36, 0, o.world, m.empty() ? std::string(k_CubeMaterial) : m,
+			                  drawLayersOf(so, "Default") });
 		}
 		else if (const auto modelId = assetIdOfModel(so.model))
 		{
@@ -425,7 +451,7 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 					const std::string m    = assigned(slot);
 					const ModelCache::Mesh& mesh = gpu->meshes[d.mesh];
 					wants.push_back({ mesh.vb, mesh.ib, GfxFormat::R32_Uint, d.indexCount, d.indexOffset, o.world * d.node,
-					                  m.empty() ? autoMaterialKey(*modelId, d.slot) : m });
+					                  m.empty() ? autoMaterialKey(*modelId, d.slot) : m, drawLayersOf(so, slot) });
 				}
 			}
 		}
@@ -441,6 +467,8 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 			d.indexCount  = w.count;
 			d.indexOffset = w.offset;
 			d.material    = w.material;
+			d.layers      = w.layers;
+			d.world       = w.world;
 			if (!d.cb.valid())
 				d.cb = engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform });
 			ObjectConstants c;
@@ -541,15 +569,16 @@ void ViewportRenderer::drawPreview(GraphicsEngine& engine, IRenderTarget* rt, ui
 
 void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::DrawContext& ctx)
 {
-	if (query.layer == "Grid")
+	if (query.layer == k_GridLayer)
 	{
 		ctx.cb->drawInstanced(6);   // y = 0 の大きな四角形 (assets/shaders/grid.vs.hlsl)
 		return;
 	}
 	if (!m_engine)
 		return;
-	// layer = マテリアルパス (M5-4)。そのパスを持つマテリアルの物体を、マテリアルのパイプラインで描く (マテリアルの順に並べる)
-	// 影のパス: 影を落とす物体だけ。マテリアルが Shadow パスを持たなければ、標準の影のパイプライン
+	// layer = マテリアルパス (M5-4)。物体 (スロット) の描画レイヤーにこの layer があるメッシュを描く (マテリアルの順に並べる)。
+	// マテリアルがこのパスのパイプラインを持てばそれ、なければノードのパイプラインで描く。
+	// 影のパス: 描画レイヤーによらず、影を落とす物体だけ。マテリアルが Shadow パスを持たなければ、標準の影のパイプライン
 	const std::string& pass = query.layer;
 	const bool shadowPass = pass == k_ShadowPass;
 	if (shadowPass && !m_shadowActive)
@@ -562,10 +591,10 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 		if (o.visible && (!shadowPass || o.castShadow))
 			for (const DrawItem& d : o.draws)
 			{
-				if (m_materials.hasPass(d.material, pass))
+				if (shadowPass)
+					items.push_back({ &d, m_materials.hasPass(d.material, pass) ? &d.material : &shadowFallback });
+				else if (std::find(d.layers.begin(), d.layers.end(), pass) != d.layers.end())
 					items.push_back({ &d, &d.material });
-				else if (shadowPass)
-					items.push_back({ &d, &shadowFallback });
 			}
 	std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return *a.material < *b.material; });
 
@@ -579,7 +608,8 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 		if (!current || *current != *it.material)
 		{
 			current = it.material;
-			ok = m_materials.prepare(*m_engine, *it.material, pass, ctx.targets, bound);
+			ok = m_materials.prepare(*m_engine, *it.material, pass, ctx.targets, bound,
+			                         shadowPass ? std::string() : ctx.pass->desc.pipeline);
 			if (!ok)
 				continue;
 			// パイプラインを替えるとルートシグネチャも替わるので、バインドはすべて設定し直す

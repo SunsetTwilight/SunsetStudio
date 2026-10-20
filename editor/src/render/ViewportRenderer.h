@@ -9,6 +9,8 @@
 //  プロジェクトを開くたびに init し直す (M4a)。
 //  このクラスは、シーン (シーンのファイルの物体と地面のグリッド) とフレームの定数を IDrawListProvider としてグラフに渡し、
 //  M5-4: drawList の layer をマテリアルパスとして、そのパスを持つマテリアルの物体をマテリアルのパイプラインで描く。
+//  描画レイヤー: 物体 (やスロット) の layers に入っているレイヤーのノードだけが、そのメッシュを描く。マテリアルが
+//  そのレイヤーのパイプラインを持たなければノードのパイプラインで描く。どのノードにも入らないメッシュはピンクで重ねる。
 //  アセットの変更 (ファイルの保存、インスペクターの編集) をその場で反映する。
 //
 //  描画スレッドだけが使う。
@@ -20,6 +22,7 @@
 #include "OrbitCamera.h"
 #include "ResourceViewer.h"
 #include "SelectionOutline.h"
+#include "UnassignedOverlay.h"
 #include "services/Scene.h"
 
 #include "gfx/core/GraphicsEngine.h"
@@ -111,6 +114,8 @@ private:
 		uint32_t     indexOffset = 0;
 		BufferHandle cb;          // ワールド行列と色 (common.hlsli の Object)
 		std::string  material;    // マテリアルのキー (ファイルのパス / "auto:…")
+		std::vector<std::string> layers;   // 描くレイヤー (Scene の drawLayersOf)
+		Mat4         world;       // どこにも描かれないときの印に使う
 	};
 	struct Object
 	{
@@ -136,6 +141,8 @@ private:
 	bool                m_viewerOk = false;
 	SelectionOutline    m_outline;
 	bool                m_outlineOk = false;
+	UnassignedOverlay   m_unassigned;
+	bool                m_unassignedOk = false;
 	SceneDesc           m_sceneDesc;     // 選択の判定に使う
 	std::string         m_selection;
 	std::string         m_viewerError;

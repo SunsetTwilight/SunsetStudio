@@ -172,6 +172,8 @@ export interface SceneObjectJson {
   materials?: Record<string, string>; // スロット → マテリアルのファイル (書いていないスロットは取り込んだ値。M5-4)
   light?: SceneLightJson; // あればライト (モデルは描かない。M5-5)
   castShadow?: boolean; // false なら影を落とさない (書いていなければ落とす)
+  layers?: string[]; // 描画レイヤー (drawList の layer)。書いていなければ "Opaque"、空 = どこにも描かない
+  slotLayers?: Record<string, string[]>; // スロット → 描画レイヤー (物体の layers を上書き)
 }
 export interface SceneShadowJson {
   enabled: boolean;

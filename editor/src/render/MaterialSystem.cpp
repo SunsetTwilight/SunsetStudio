@@ -260,19 +260,20 @@ void MaterialSystem::reflect(PassState& ps)
 }
 
 bool MaterialSystem::prepare(GraphicsEngine& engine, const std::string& key, const std::string& pass,
-                             const gfx::rg::PipelineTargets& targets, Bound& out)
+                             const gfx::rg::PipelineTargets& targets, Bound& out, const std::string& fallbackPipeline)
 {
 	out = {};
 	Instance& inst = instance(key);
 	if (!inst.ok)
 		return false;   // 読めない理由は load で記録した
 	const auto it = inst.desc.passes.find(pass);
-	if (it == inst.desc.passes.end())
+	const std::string& pipeline = it != inst.desc.passes.end() ? it->second : fallbackPipeline;
+	if (pipeline.empty())
 		return false;
 	PassState& ps = inst.passes[pass];
-	if (ps.pipeline != it->second)
+	if (ps.pipeline != pipeline)
 	{
-		ps.pipeline  = it->second;
+		ps.pipeline  = pipeline;
 		ps.reflected = false;
 	}
 	if (!ps.reflected)

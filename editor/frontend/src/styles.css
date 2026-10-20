@@ -1404,6 +1404,25 @@ button.link:disabled {
   flex: 1;
   min-width: 0;
 }
+/* 描画レイヤー (どの描画ノードでメッシュを描くか) */
+.draw-layers {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.draw-layer-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.draw-layer {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
 .material-unused,
 .object-slots-note {
   font-size: 12px;

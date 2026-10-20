@@ -134,3 +134,37 @@ TEST_CASE("シーン: クリックの選択 (光線と箱)")
 
 	CHECK(uniqueObjectId(s, "cube") == "cube-1");
 }
+
+TEST_CASE("シーン: 描画レイヤー (物体の既定とスロットの上書き)")
+{
+	const Json j = { { "objects", Json::array({
+		{ { "id", "plain" } },
+		{ { "id", "toon" }, { "layers", { "Toon", "Outline" } }, { "slotLayers", { { "Hair", { "Opaque" } }, { "Hidden", Json::array() } } } },
+		{ { "id", "none" }, { "layers", Json::array() } },
+	}) } };
+	SceneDesc s;
+	SceneDiagnostics diag;
+	REQUIRE(sceneFromJson(j, s, diag));
+	CHECK(diag.warnings.empty());
+	// 書いていなければ既定の Opaque
+	CHECK_FALSE(s.objects[0].layers.has_value());
+	CHECK(drawLayersOf(s.objects[0], "Default") == std::vector<std::string>{ "Opaque" });
+	// 物体の指定、スロットの上書き、空 (どこにも描かない)
+	CHECK(drawLayersOf(s.objects[1], "Body") == std::vector<std::string>{ "Toon", "Outline" });
+	CHECK(drawLayersOf(s.objects[1], "Hair") == std::vector<std::string>{ "Opaque" });
+	CHECK(drawLayersOf(s.objects[1], "Hidden").empty());
+	CHECK(drawLayersOf(s.objects[2], "Default").empty());
+
+	// 読み書きで同じ (書いていない物体には layers を書かない)
+	const Json back = sceneToJson(s);
+	CHECK_FALSE(back["objects"][0].contains("layers"));
+	CHECK(back["objects"][1]["layers"] == Json({ "Toon", "Outline" }));
+	CHECK(back["objects"][1]["slotLayers"]["Hidden"] == Json::array());
+	CHECK(back["objects"][2]["layers"] == Json::array());
+
+	// 形の違いはエラー
+	SceneDiagnostics d2;
+	CHECK_FALSE(sceneFromJson({ { "objects", Json::array({ { { "id", "a" }, { "layers", "Opaque" } },
+	                                                       { { "id", "b" }, { "slotLayers", { { "S", { "" } } } } } }) } }, s, d2));
+	CHECK(d2.errors.size() == 2);
+}

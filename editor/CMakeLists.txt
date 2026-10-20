@@ -74,6 +74,8 @@ add_executable(SunsetEditor
     src/render/ResourceViewer.cpp
     src/render/SelectionOutline.h
     src/render/SelectionOutline.cpp
+    src/render/UnassignedOverlay.h
+    src/render/UnassignedOverlay.cpp
     src/render/ModelCache.h
     src/render/ModelCache.cpp
     src/render/MaterialSystem.h

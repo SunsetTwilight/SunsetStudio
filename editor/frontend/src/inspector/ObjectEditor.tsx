@@ -3,6 +3,7 @@
 //
 //  名前、モデル (立方体か、ライブラリのモデル、M5-3)、親、位置 / 回転 (度。X → Y → Z の順) / 大きさ、表示、
 //  ライトの物体 (M5-5) はモデル / 色 / マテリアルの代わりにライトの欄 (LightEditor)。
+//  描画レイヤー (どの描画ノードで描くか。物体と、スロットごとの上書き。DrawLayerEditor)、
 //  色 (マテリアルの色に掛ける)、スロットごとのマテリアル (M5-4。取り込んだ値 / materials/ のファイル。
 //  「マテリアルにする」で取り込んだ値をファイルに書き出して割り当てる。「開く」でマテリアルのタブ)。
 //  変えるとシーン全体の JSON を scene.set で送る (元に戻す / やり直すが効く。保存はシーンのパネル)。
@@ -17,6 +18,7 @@ import { autoMaterialKey, loadMaterialFiles, newMaterialPath, objectSlots, withA
 import { applyScene, fromHex, parentCandidates, toHex, updateObject } from '../state/scene';
 import { useStudio } from '../state/store';
 import { NameBox, NumberBox } from './GraphEditors';
+import { DrawLayerEditor } from './DrawLayerEditor';
 import { LightEditor } from './LightEditor';
 
 type Vec3 = [number, number, number];
@@ -188,6 +190,7 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
           </div>
         );
       })}
+      <DrawLayerEditor scene={scene} obj={obj} slots={slots} apply={applyWhole} />
         </>
       )}
     </div>

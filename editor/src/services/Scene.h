@@ -24,6 +24,9 @@
 //    links は照らす物体の id (子も含む。空 = すべての物体。ライトリンク)。向きはローカルの -Z
 //    "shadow": { "enabled": true, "bias": 0.001, "normalBias": 0.03, "softness": 1.5 } は影 (今は最初の平行光源だけ)
 //  ・castShadow: false の物体は影を落とさない (書いていなければ落とす)
+//  ・layers は描画レイヤー (グラフの drawList の layer) の名前の配列。この物体を描くノードを選ぶ。
+//    slotLayers はスロットの名前 → 描画レイヤーで、そのスロットだけ上書きする。どちらも書いていなければ既定の
+//    "Opaque"。空の配列は「どこにも描かない」(エディターがピンクで見せる)。Shadow は castShadow で決まる
 //  行列は列優先 (m[列 * 4 + 行]、OrbitCamera.h の Mat4 と同じ)。
 // ============================================================
 
@@ -73,6 +76,8 @@ struct SceneObject
 	std::map<std::string, std::string> materials;   // スロット → マテリアルのファイル (書いていなければ取り込んだ値)
 	std::optional<SceneLight> light;                 // あればライト (M5-5)
 	bool                      castShadow = true;     // 影を落とす
+	std::optional<std::vector<std::string>> layers;  // 描画レイヤー (なければ既定)
+	std::map<std::string, std::vector<std::string>> slotLayers;   // スロット → 描画レイヤー (物体の指定を上書き)
 };
 
 struct SceneDesc
@@ -122,6 +127,11 @@ std::array<float, 3> lightDirection(const Matrix& world);
 Matrix directionalShadowMatrix(const std::array<float, 3>& direction, const std::vector<Matrix>& boxes);
 // 列優先の行列で点を写す (w で割る)
 std::array<float, 3> transformPoint(const Matrix& m, const std::array<float, 3>& p);
+
+// ---- 描画レイヤー ----
+constexpr const char* k_DefaultDrawLayer = "Opaque";   // 何も指定していない物体のレイヤー
+// 物体のスロットを描くレイヤー: スロットの上書き → 物体の layers → 既定 ("Opaque")
+std::vector<std::string> drawLayersOf(const SceneObject& o, const std::string& slot);
 
 // 新しいプロジェクトの既定のシーン (M4 までの固定の立方体と同じ並び: 中央の大きな立方体 + 周りの 48 個、
 // 影を受ける地面 "Ground" (薄い箱)、今までの光と同じ向きの、影を落とす平行光源 "Sun" (最後))
