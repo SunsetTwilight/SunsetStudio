@@ -29,7 +29,7 @@ set(STUDIO_GITHUB_OWNER "SunsetTwilight" CACHE STRING "自作ライブラリの 
 set(STUDIO_GFX_TAG      "v0.4.2"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
 set(STUDIO_MATHLIB_TAG  "v0.1.0"         CACHE STRING "SunsetMathLib のタグ / ブランチ / コミット")
 # SunsetAsset はまだタグがないので、コミットで固定する (v0.1.0 のタグを作ったら差し替える)
-set(STUDIO_ASSET_TAG    "26096953d8868b1c57a3d16845a5582dcf1f46da" CACHE STRING "SunsetAsset のタグ / ブランチ / コミット")
+set(STUDIO_ASSET_TAG    "8b8d1a984c166f63a656d9d28567c8c50d325b92" CACHE STRING "SunsetAsset のタグ / ブランチ / コミット")
 set(STUDIO_GFX_URL      "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetGraphicsEngine/archive/${STUDIO_GFX_TAG}.tar.gz"
     CACHE STRING "SunsetGraphicsEngine の取得元 (アーカイブの URL)")
 set(STUDIO_MATHLIB_URL  "https://github.com/${STUDIO_GITHUB_OWNER}/SunsetMathLib/archive/${STUDIO_MATHLIB_TAG}.tar.gz"

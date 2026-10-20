@@ -133,7 +133,7 @@ export function LibraryPanel() {
             )}
           </div>
         ))}
-        {library.assets.length === 0 && <div className="placeholder">アセットがありません (「取り込む…」で FBX / glTF / OBJ / 画像を加える)</div>}
+        {library.assets.length === 0 && <div className="placeholder">アセットがありません (「取り込む…」で FBX / glTF / OBJ / PMX / PMD / 画像を加える)</div>}
       </div>
       {selected && <AssetDetails asset={selected} onReimport={() => void reimport(selected)} />}
     </div>
