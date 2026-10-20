@@ -171,11 +171,19 @@ export interface SceneObjectJson {
   color: [number, number, number, number]; // マテリアルの色に掛ける色
   materials?: Record<string, string>; // スロット → マテリアルのファイル (書いていないスロットは取り込んだ値。M5-4)
   light?: SceneLightJson; // あればライト (モデルは描かない。M5-5)
+  castShadow?: boolean; // false なら影を落とさない (書いていなければ落とす)
+}
+export interface SceneShadowJson {
+  enabled: boolean;
+  bias: number;
+  normalBias: number;
+  softness: number;
 }
 export interface SceneLightJson {
   type: string; // lights/<種類>.light.json
   params: Record<string, JsonValue>; // 書いていない値は種類の既定値
   links?: string[]; // 照らす物体の id (子も含む。なければすべて)
+  shadow?: SceneShadowJson; // 影 (今は最初の平行光源だけ)
 }
 // ライトの種類 (M5-5)
 export interface LightParamInfo {

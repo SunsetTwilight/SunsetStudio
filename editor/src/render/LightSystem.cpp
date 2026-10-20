@@ -26,6 +26,9 @@ static_assert(sizeof(LightGpu) == 112, "cbuffer の配列の要素は 16 バイ�
 struct LightsConstants
 {
 	uint32_t count[4];
+	uint32_t shadowInfo[4];
+	float    shadowParams[4];
+	Mat4     shadowViewProj;
 	LightGpu lights[k_MaxLights];
 };
 
@@ -177,6 +180,15 @@ void LightSystem::setLights(std::vector<Light> lights)
 	m_dirty  = true;
 }
 
+void LightSystem::setShadow(const Mat4& viewProj, float bias, float normalBias, float softness)
+{
+	m_shadowViewProj  = viewProj;
+	m_shadowParams[0] = bias;
+	m_shadowParams[1] = normalBias;
+	m_shadowParams[2] = softness;
+	m_dirty = true;
+}
+
 BufferHandle LightSystem::constants(GraphicsEngine& engine)
 {
 	if (!m_cb.valid() || !m_dirty)
@@ -185,6 +197,9 @@ BufferHandle LightSystem::constants(GraphicsEngine& engine)
 	auto c = std::make_unique<LightsConstants>();
 	std::memset(c.get(), 0, sizeof(LightsConstants));
 	uint32_t n = 0;
+	c->shadowInfo[0] = 0xFFFFFFFFu;
+	std::copy_n(m_shadowParams, 4, c->shadowParams);
+	c->shadowViewProj = m_shadowViewProj;
 	for (const Light& l : m_lights)
 	{
 		const auto it = std::find_if(m_types.begin(), m_types.end(), [&](const LightTypeDef& t) { return t.id == l.type; });
@@ -208,6 +223,8 @@ BufferHandle LightSystem::constants(GraphicsEngine& engine)
 		std::copy_n(p.begin(), k_LightParamFloats, g.params);
 		g.info[0] = static_cast<uint32_t>(it - m_types.begin());
 		g.info[1] = l.mask;
+		if (l.shadow && c->shadowInfo[0] == 0xFFFFFFFFu)
+			c->shadowInfo[0] = n - 1;
 	}
 	c->count[0] = n;
 	engine.updateBuffer(m_cb, c.get(), sizeof(LightsConstants));

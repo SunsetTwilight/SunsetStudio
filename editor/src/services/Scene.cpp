@@ -80,8 +80,17 @@ Json sceneToJson(const SceneDesc& s)
 			Json l = { { "type", o.light->type }, { "params", o.light->params.is_object() ? o.light->params : Json::object() } };
 			if (!o.light->links.empty())
 				l["links"] = o.light->links;
+			if (!(o.light->shadow == SceneShadow{}))
+			{
+				const SceneShadow& sh = o.light->shadow;
+				// float のまま書くと 0.0010000000474974513 のようになるので、6 桁に丸めて double で書く
+				auto r = [](float v) { return std::round(static_cast<double>(v) * 1e6) / 1e6; };
+				l["shadow"] = { { "enabled", sh.enabled }, { "bias", r(sh.bias) }, { "normalBias", r(sh.normalBias) }, { "softness", r(sh.softness) } };
+			}
 			j["light"] = std::move(l);
 		}
+		if (!o.castShadow)
+			j["castShadow"] = false;
 		objects.push_back(std::move(j));
 	}
 	Json j = { { "version", s.version }, { "objects", objects } };
@@ -167,6 +176,22 @@ bool sceneFromJson(const Json& json, SceneDesc& out, SceneDiagnostics& diag)
 								if (lv.is_object()) l.params = lv;
 								else diag.errors.push_back(at + ".light.params: オブジェクトが必要です");
 							}
+							else if (lk == "shadow")
+							{
+								if (!lv.is_object()) { diag.errors.push_back(at + ".light.shadow: オブジェクトが必要です"); continue; }
+								for (const auto& [sk, sv] : lv.items())
+								{
+									auto num = [&](float& dst) {
+										if (sv.is_number() && std::isfinite(sv.get<float>())) dst = sv.get<float>();
+										else diag.errors.push_back(at + ".light.shadow." + sk + ": 数が必要です");
+									};
+									if (sk == "enabled") { if (sv.is_boolean()) l.shadow.enabled = sv.get<bool>(); else diag.errors.push_back(at + ".light.shadow.enabled: 真偽値が必要です"); }
+									else if (sk == "bias") num(l.shadow.bias);
+									else if (sk == "normalBias") num(l.shadow.normalBias);
+									else if (sk == "softness") num(l.shadow.softness);
+									else diag.warnings.push_back(at + ".light.shadow." + sk + ": 知らないキーなので無視します");
+								}
+							}
 							else if (lk == "links")
 							{
 								if (!lv.is_array()) { diag.errors.push_back(at + ".light.links: 物体の id の配列が必要です"); continue; }
@@ -181,6 +206,7 @@ bool sceneFromJson(const Json& json, SceneDesc& out, SceneDiagnostics& diag)
 						}
 						o.light = std::move(l);
 					}
+					else if (k == "castShadow") { if (x.is_boolean()) o.castShadow = x.get<bool>(); else diag.errors.push_back(at + ".castShadow: 真偽値が必要です"); }
 					else if (k == "layer") {}   // M5-2 の仮の項目 (M5-4 でマテリアルパスに置き換えた)。読み飛ばす
 					else diag.warnings.push_back(at + "." + k + ": 知らないキーなので無視します");
 				}
@@ -312,7 +338,15 @@ SceneDesc defaultScene()
 			o.color    = { c[0], c[1], c[2], 1 };
 			s.objects.push_back(std::move(o));
 		}
-	// 今までの固定の光 (向き (-0.45, -1, -0.3)、色 (1, 0.96, 0.9)) と同じ平行光源
+	// 影を受ける地面 (上の面は y = -0.01。グリッドの線 (y = 0) が隠れないように少し下げる)
+	SceneObject ground;
+	ground.id       = "ground";
+	ground.name     = "Ground";
+	ground.position = { 0, -0.06f, 0 };
+	ground.scale    = { 42, 0.1f, 42 };
+	ground.color    = { 0.42f, 0.43f, 0.45f, 1 };
+	s.objects.push_back(std::move(ground));
+	// 今までの固定の光 (向き (-0.45, -1, -0.3)、色 (1, 0.96, 0.9)) と同じ平行光源。影を落とす
 	SceneObject sun;
 	sun.id       = "sun";
 	sun.name     = "Sun";
@@ -322,6 +356,7 @@ SceneDesc defaultScene()
 	SceneLight light;
 	light.type   = "directional";
 	light.params = { { "color", { 1.0, 0.96, 0.9 } }, { "intensity", 1.0 } };
+	light.shadow.enabled = true;
 	sun.light    = std::move(light);
 	s.objects.push_back(std::move(sun));
 	return s;
@@ -392,6 +427,75 @@ std::array<float, 3> lightDirection(const Matrix& m)
 		return { 0, -1, 0 };
 	for (float& x : d) x /= len;
 	return d;
+}
+
+std::array<float, 3> transformPoint(const Matrix& m, const std::array<float, 3>& p)
+{
+	float r[4] = {};
+	for (int row = 0; row < 4; ++row)
+		r[row] = m[row] * p[0] + m[4 + row] * p[1] + m[8 + row] * p[2] + m[12 + row];
+	const float w = std::fabs(r[3]) > 1e-12f ? r[3] : 1.0f;
+	return { r[0] / w, r[1] / w, r[2] / w };
+}
+
+Matrix directionalShadowMatrix(const std::array<float, 3>& direction, const std::vector<Matrix>& boxes)
+{
+	Matrix id {};
+	id[0] = id[5] = id[10] = id[15] = 1;
+	if (boxes.empty())
+		return id;
+	auto dot   = [](const std::array<float, 3>& a, const std::array<float, 3>& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+	auto cross = [](const std::array<float, 3>& a, const std::array<float, 3>& b) {
+		return std::array<float, 3>{ a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
+	};
+	auto norm = [&](std::array<float, 3> v) {
+		const float l = std::sqrt(dot(v, v));
+		if (l > 1e-12f) for (float& x : v) x /= l;
+		return v;
+	};
+	// 光の座標系: 前 = -z = direction。上は y (ほぼ真上 / 真下の光なら x)
+	const std::array<float, 3> f = norm(direction);
+	const std::array<float, 3> up = std::fabs(f[1]) > 0.99f ? std::array<float, 3>{ 1, 0, 0 } : std::array<float, 3>{ 0, 1, 0 };
+	const std::array<float, 3> s = norm(cross(f, up));
+	const std::array<float, 3> u = cross(s, f);
+	Matrix view {};   // 行 = s, u, -f (原点は世界の原点。平行移動は射影の範囲で吸収する)
+	view[0] = s[0]; view[4] = s[1]; view[8]  = s[2];
+	view[1] = u[0]; view[5] = u[1]; view[9]  = u[2];
+	view[2] = -f[0]; view[6] = -f[1]; view[10] = -f[2];
+	view[15] = 1;
+	float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+	for (const Matrix& b : boxes)
+		for (int c = 0; c < 8; ++c)
+		{
+			const auto w = transformPoint(b, { (c & 1) ? 0.5f : -0.5f, (c & 2) ? 0.5f : -0.5f, (c & 4) ? 0.5f : -0.5f });
+			const auto v = transformPoint(view, w);
+			for (int k = 0; k < 3; ++k) { lo[k] = std::min(lo[k], v[k]); hi[k] = std::max(hi[k], v[k]); }
+		}
+	// 縁で切れないよう少し広げる
+	for (int k = 0; k < 3; ++k)
+	{
+		const float pad = std::max((hi[k] - lo[k]) * 0.02f, 0.05f);
+		lo[k] -= pad; hi[k] += pad;
+	}
+	// 正射影: x, y → -1〜1、z (光の座標で -f 向きが正) は近い (hi) → 0、遠い (lo) → 1
+	Matrix proj {};
+	proj[0]  = 2.0f / (hi[0] - lo[0]);
+	proj[5]  = 2.0f / (hi[1] - lo[1]);
+	proj[10] = 1.0f / (lo[2] - hi[2]);
+	proj[12] = -(hi[0] + lo[0]) / (hi[0] - lo[0]);
+	proj[13] = -(hi[1] + lo[1]) / (hi[1] - lo[1]);
+	proj[14] = -hi[2] / (lo[2] - hi[2]);
+	proj[15] = 1;
+	Matrix out {};
+	for (int c = 0; c < 4; ++c)
+		for (int r = 0; r < 4; ++r)
+		{
+			float acc = 0;
+			for (int k = 0; k < 4; ++k)
+				acc += proj[k * 4 + r] * view[c * 4 + k];
+			out[c * 4 + r] = acc;
+		}
+	return out;
 }
 
 std::string uniqueObjectId(const SceneDesc& scene, const std::string& prefix)

@@ -120,6 +120,7 @@ private:
 		Mat4                  box;   // 選択の判定と印の箱 (単位の箱をワールドへ)
 		std::vector<DrawItem> draws;
 		bool                  light = false;   // ライトの物体 (描かず、印を描く。M5-5)
+		bool                  castShadow = true;
 	};
 	static void releaseDraws(GraphicsEngine& engine, Object& o, size_t keep);
 	void updateObjects(GraphicsEngine& engine);   // m_sceneDesc と m_models から m_objects を作り直す
@@ -144,6 +145,10 @@ private:
 	MaterialSystem      m_materials;
 	LightSystem         m_lights;
 	Float3              m_sunDirection { -0.396f, -0.880f, -0.264f };   // フレームの gLightDir (最初の平行光源。古いシェーダー用)
+	// 影 (平行光源 1 つ、シーン全体に 1 枚): パスの view が "shadow" のとき、フレームの定数を光の視点にする
+	bool                m_shadowActive = false;
+	Mat4                m_shadowViewProj = Mat4::identity();
+	BufferHandle        m_shadowFrameCB;
 	GraphicsEngine*     m_engine = nullptr;   // draw の中で使う (init から shutdown まで)
 	size_t              m_reportedPipelineErrors = 0;
 	size_t              m_reportedExecutorErrors = 0;

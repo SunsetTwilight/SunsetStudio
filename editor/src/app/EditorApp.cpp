@@ -909,13 +909,13 @@ void EditorApp::runShaderSelfCheck(std::function<void(bool ok, const std::string
 	});
 }
 
-// シーンの経路: 既定のシーン (立方体 49 個 + 平行光源) が読めて、ビューポートの中央をクリックすると中央の立方体を選び、
+// シーンの経路: 既定のシーン (立方体 49 個 + 地面 + 平行光源) が読めて、ビューポートの中央をクリックすると中央の立方体を選び、
 // scene.set で動かして edit.undo で戻せる
 void EditorApp::runSceneSelfCheck(std::function<void(bool ok, const std::string& error)> done)
 {
 	Bridge& b = m_host.bridge();
 	b.callLocal("scene.get", Json::object(), [this, done](int s1, const Json& r1) {
-		if (s1 != 0 || r1["scene"]["objects"].size() != 50)
+		if (s1 != 0 || r1["scene"]["objects"].size() != 51)
 			return done(false, "scene.get: " + r1.dump().substr(0, 300));
 		const Json original = r1["scene"];
 		const int cx = static_cast<int>(m_viewport.width() / 2), cy = static_cast<int>(m_viewport.height() / 2);
@@ -934,7 +934,7 @@ void EditorApp::runSceneSelfCheck(std::function<void(bool ok, const std::string&
 								if (s4 != 0 || r4.value("kind", std::string()) != "scene" || m_sceneData.objects.empty()
 								    || m_sceneData.objects[0].position[1] != 1.5f)
 									return done(false, "edit.undo (シーン): " + r4.dump());
-								log("info", "smoke", "scene: 50 個 (立方体 49 + ライト) を読み、中央をクリックで選び、動かして元に戻した");
+								log("info", "smoke", "scene: 51 個 (立方体 49 + 地面 + ライト) を読み、中央をクリックで選び、動かして元に戻した");
 								done(true, {});
 							});
 						});
@@ -981,7 +981,8 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 	m_host.bridge().callLocal("graph.get", Json::object(), [this, done](int status, const Json& g) {
 		if (status != 0)
 			return done(false, "graph.get: " + g.dump());
-		const Json original = g["graph"];
+		const Json   original = g["graph"];
+		const size_t full     = g["order"].size();   // すべてのパスの数 (テンプレートで変わる)
 		auto withPass = [&](const std::string& name, const char* key, const Json& value) {
 			Json j = original;
 			for (auto& p : j["passes"])
@@ -993,34 +994,36 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 		const Json noLighting = withPass("Lighting", "enabled", false);   // 深度を SRV で読まない形 (DSV / DSVRead だけ)
 		const Json broken     = withPass("Composite", "pipeline", "");
 		Bridge& b = m_host.bridge();
-		b.callLocal("graph.set", { { "graph", noGrid } }, [this, done, noLighting, broken, original](int s1, const Json& r1) {
+		b.callLocal("graph.set", { { "graph", noGrid } }, [this, done, noLighting, broken, original, full](int s1, const Json& r1) {
 			const auto& order = r1["order"];
 			if (s1 != 0 || std::find(order.begin(), order.end(), "Grid") != order.end())
 				return done(false, "Grid を無効にできない: " + r1.dump());
 			log("info", "smoke", "graph.set: Grid のパスを無効に変更");
-			m_host.bridge().callLocal("graph.set", { { "graph", noLighting } }, [this, done, broken, original](int s2, const Json& r2) {
-				if (s2 != 0 || r2["order"].size() != 3)
+			m_host.bridge().callLocal("graph.set", { { "graph", noLighting } }, [this, done, broken, original, full](int s2, const Json& r2) {
+				const auto& order2 = r2["order"];
+				if (s2 != 0 || std::find(order2.begin(), order2.end(), "Lighting") != order2.end())
 					return done(false, "Lighting を無効にできない: " + r2.dump());
 				log("info", "smoke", "graph.set: Lighting のパスを無効に変更");
-				m_host.bridge().callLocal("graph.set", { { "graph", broken } }, [this, done, original](int s3, const Json& r3) {
+				m_host.bridge().callLocal("graph.set", { { "graph", broken } }, [this, done, original, full](int s3, const Json& r3) {
 					if (s3 == 0 || r3.value("code", 0) != static_cast<int>(BridgeError::InvalidParams))
 						return done(false, "コンパイルできないグラフがエラーにならない: " + r3.dump());
-					m_host.bridge().callLocal("graph.set", { { "graph", original } }, [this, done](int s4, const Json& r4) {
-						if (s4 != 0 || r4["order"].size() != 4)
+					m_host.bridge().callLocal("graph.set", { { "graph", original } }, [this, done, full](int s4, const Json& r4) {
+						if (s4 != 0 || r4["order"].size() != full)
 							return done(false, "元に戻せない: " + r4.dump());
 						// 元に戻す (Lighting を無効にした状態) → やり直す (元のグラフ)
 						Bridge& br = m_host.bridge();
-						br.callLocal("edit.undo", Json::object(), [this, done](int u1, const Json& ru1) {
+						br.callLocal("edit.undo", Json::object(), [this, done, full](int u1, const Json& ru1) {
 						if (u1 != 0)
 							return done(false, "edit.undo: " + ru1.dump());
-						m_host.bridge().callLocal("graph.get", Json::object(), [this, done](int g1, const Json& rg1) {
-						if (g1 != 0 || rg1["order"].size() != 3)
+						m_host.bridge().callLocal("graph.get", Json::object(), [this, done, full](int g1, const Json& rg1) {
+						const auto& order1 = rg1["order"];
+						if (g1 != 0 || std::find(order1.begin(), order1.end(), "Lighting") != order1.end())
 							return done(false, "元に戻したグラフが違う: " + rg1.dump());
-						m_host.bridge().callLocal("edit.redo", Json::object(), [this, done](int u2, const Json& ru2) {
+						m_host.bridge().callLocal("edit.redo", Json::object(), [this, done, full](int u2, const Json& ru2) {
 						if (u2 != 0 || ru2["state"]["canRedo"] != false)
 							return done(false, "edit.redo: " + ru2.dump());
-						m_host.bridge().callLocal("graph.get", Json::object(), [this, done](int g2, const Json& rg2) {
-						if (g2 != 0 || rg2["order"].size() != 4)
+						m_host.bridge().callLocal("graph.get", Json::object(), [this, done, full](int g2, const Json& rg2) {
+						if (g2 != 0 || rg2["order"].size() != full)
 							return done(false, "やり直したグラフが違う: " + rg2.dump());
 						log("info", "smoke", "edit.undo / edit.redo: グラフを戻してやり直した");
 						// 保存はプロジェクトのアセットの起点 (version 2 はプロジェクトのフォルダ) に書く

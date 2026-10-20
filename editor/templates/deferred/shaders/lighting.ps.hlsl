@@ -1,4 +1,4 @@
-// ライティング: G-Buffer と深度と、シーンのライト (M5-5) から HDR (リニア) の色を求める
+// ライティング: G-Buffer と深度と、シーンのライト (M5-5) と影 (Shadow パスのシャドウマップ) から HDR (リニア) の色を求める
 //   ライトの種類の計算は lights/<種類>.light.hlsl にあり、generated/lights.hlsli (エディターが作る) がまとめる。
 //   種類を足しても、このファイルは直さなくてよい
 #include "common.hlsli"
@@ -8,6 +8,27 @@ Texture2D        gAlbedo    : register(t0);
 Texture2D        gNormal    : register(t1);
 Texture2D<float> gDepth     : register(t2);
 Texture2D<uint>  gLightMaskTex : register(t3);   // 物体のライトリンクのマスク (G-Buffer の gbLightMask。標準のマテリアルが書く)
+Texture2D<float> gShadowMap    : register(t4);   // 影を落とす平行光源の深さ (Shadow パス)
+SamplerComparisonState gShadowSampler : register(s0);
+
+// 影: 1 = 光が当たる、0 = 影。法線の向きに少し押し出してから光の視点に写し、周り 3 x 3 を比べてぼかす (PCF)
+float shadowFactor(float3 worldPos, float3 n)
+{
+	const float3 p  = worldPos + n * gShadowParams.y;
+	const float4 sp = mul(gShadowViewProj, float4(p, 1));
+	const float3 c  = sp.xyz / sp.w;
+	const float2 uv = c.xy * float2(0.5, -0.5) + 0.5;
+	if (any(uv < 0) || any(uv > 1) || c.z > 1)
+		return 1;
+	uint w, h;
+	gShadowMap.GetDimensions(w, h);
+	const float2 texel = gShadowParams.z / float2(w, h);
+	float sum = 0;
+	[unroll] for (int y = -1; y <= 1; ++y)
+		[unroll] for (int x = -1; x <= 1; ++x)
+			sum += gShadowMap.SampleCmpLevelZero(gShadowSampler, uv + float2(x, y) * texel, c.z - gShadowParams.x);
+	return sum / 9;
+}
 
 struct PSIn
 {
@@ -61,10 +82,13 @@ float4 main(PSIn i) : SV_Target
 		const float  ndl     = saturate(dot(n, ls.direction));
 		if (ndl <= 0)
 			continue;
+		const float  shadow  = li == gShadowInfo.x ? shadowFactor(s.position, n) : 1.0;
+		if (shadow <= 0)
+			continue;
 		const float3 h       = normalize(ls.direction + s.view);
 		const float3 fresnel = specColor + (1 - specColor) * pow(1 - saturate(dot(h, s.view)), 5);
 		const float  spec    = (shininess + 8) / 25.1327 * pow(saturate(dot(n, h)), shininess);   // (n + 8) / (8π)
-		color += (diffColor + fresnel * spec) * ndl * ls.radiance;
+		color += (diffColor + fresnel * spec) * ndl * ls.radiance * shadow;
 	}
 	return float4(color, 1);
 }

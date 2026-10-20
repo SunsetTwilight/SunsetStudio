@@ -145,6 +145,12 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
       ) : (
         <>
       <div className="form-row">
+        <span className="form-label" title="平行光源の影 (シャドウマップ) に描くか">影を落とす</span>
+        <span className="form-control">
+          <input type="checkbox" checked={obj.castShadow !== false} onChange={(e) => void set({ castShadow: e.target.checked ? undefined : false }, e.target.checked ? '影を落とす' : '影を落とさない')} />
+        </span>
+      </div>
+      <div className="form-row">
         <span className="form-label" title="マテリアルの色に掛ける色 (同じモデルを 1 体ずつ色違いにする)">色 (掛ける)</span>
         <span className="form-control">
           <input type="color" value={toHex(obj.color)} onChange={(e) => void set({ color: fromHex(e.target.value, obj.color[3]) }, `色 = ${e.target.value}`)} />

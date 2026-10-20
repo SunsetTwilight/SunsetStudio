@@ -156,3 +156,68 @@ TEST_CASE("シーン: ライトリンクのマスク")
 	CHECK(m.lightMasks[33] == k_LightMaskAll);
 	CHECK(m.warnings.size() == 1);
 }
+
+TEST_CASE("影: ライトの shadow と物体の castShadow の読み書き")
+{
+	const Json j = { { "objects", {
+		{ { "id", "hero" }, { "castShadow", false } },
+		{ { "id", "sun" }, { "model", "" }, { "light", { { "type", "directional" },
+			{ "shadow", { { "enabled", true }, { "bias", 0.002 }, { "softness", 2 } } } } } },
+	} } };
+	SceneDesc s;
+	SceneDiagnostics diag;
+	REQUIRE(sceneFromJson(j, s, diag));
+	CHECK(diag.warnings.empty());
+	CHECK_FALSE(s.objects[0].castShadow);
+	REQUIRE(s.objects[1].light);
+	CHECK(s.objects[1].light->shadow.enabled);
+	CHECK(s.objects[1].light->shadow.bias == doctest::Approx(0.002f));
+	CHECK(s.objects[1].light->shadow.normalBias == doctest::Approx(0.03f));   // 既定値
+	const Json out = sceneToJson(s);
+	CHECK(out["objects"][0]["castShadow"] == false);
+	CHECK(out["objects"][1]["light"]["shadow"]["enabled"] == true);
+	// 既定のままなら書かない
+	s.objects[0].castShadow = true;
+	s.objects[1].light->shadow = {};
+	CHECK_FALSE(sceneToJson(s)["objects"][0].contains("castShadow"));
+	CHECK_FALSE(sceneToJson(s)["objects"][1]["light"].contains("shadow"));
+
+	SceneDiagnostics bad;
+	CHECK_FALSE(sceneFromJson({ { "objects", { { { "id", "a" }, { "castShadow", 1 } } } } }, s, bad));
+	CHECK_FALSE(sceneFromJson({ { "objects", { { { "id", "a" }, { "light", { { "shadow", { { "bias", "x" } } } } } } } } }, s, bad));
+
+	// 既定のシーン: Sun は影を落とし、地面がある
+	const SceneDesc def = defaultScene();
+	CHECK(def.objects.back().light->shadow.enabled);
+	CHECK(def.find("ground") != nullptr);
+}
+
+TEST_CASE("影: 平行光源の影の行列は、すべての箱を 0〜1 の深さと -1〜1 に写す")
+{
+	const SceneDesc def = defaultScene();
+	const auto world = worldMatrices(def);
+	std::vector<Matrix> boxes(world.begin(), world.end() - 1);   // ライト以外
+	const auto dir = lightDirection(world.back());
+	const Matrix m = directionalShadowMatrix(dir, boxes);
+	for (const Matrix& b : boxes)
+		for (int c = 0; c < 8; ++c)
+		{
+			const auto w = transformPoint(b, { (c & 1) ? 0.5f : -0.5f, (c & 2) ? 0.5f : -0.5f, (c & 4) ? 0.5f : -0.5f });
+			const auto p = transformPoint(m, w);
+			CHECK(p[0] >= -1.0f);
+			CHECK(p[0] <= 1.0f);
+			CHECK(p[1] >= -1.0f);
+			CHECK(p[1] <= 1.0f);
+			CHECK(p[2] >= 0.0f);
+			CHECK(p[2] <= 1.0f);
+		}
+	// 光に近い点ほど深さが小さい (中央の立方体の上面 < 地面の中心)
+	const auto top    = transformPoint(m, { 0, 3, 0 });
+	const auto bottom = transformPoint(m, { 0, -0.01f, 0 });
+	CHECK(top[2] < bottom[2]);
+	// 真下を向く光でも作れる
+	const Matrix down = directionalShadowMatrix({ 0, -1, 0 }, boxes);
+	CHECK(transformPoint(down, { 0, 3, 0 })[2] < transformPoint(down, { 0, 0, 0 })[2]);
+	// 箱がなければ単位行列
+	CHECK(directionalShadowMatrix(dir, {})[0] == 1.0f);
+}

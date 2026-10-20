@@ -12,7 +12,10 @@ namespace studio
 {
 namespace
 {
-const char* k_CubeMaterial = "auto:cube";
+const char* k_CubeMaterial   = "auto:cube";
+const char* k_ShadowFallback = "auto:shadow";   // Shadow パスを持たないマテリアルの物体を、影に描くとき
+const char* k_ShadowPass     = "Shadow";        // 影のマテリアルパス (グラフの Shadow パスの drawList の layer)
+const char* k_StandardShadowPipeline = "pipelines/materials/standard.shadow.json";
 
 // assets/shaders/common.hlsli の Frame と合わせる
 struct FrameConstants
@@ -101,6 +104,7 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 	m_vb = engine.createBuffer({ vertices.size() * sizeof(MeshVertex), BufferUsage::Vertex, vertices.data(), sizeof(MeshVertex) });
 	m_ib = engine.createBuffer({ indices.size() * sizeof(uint16_t), BufferUsage::Index, indices.data(), sizeof(uint16_t) });
 	m_frameCB = engine.createBuffer({ sizeof(FrameConstants), BufferUsage::Uniform });
+	m_shadowFrameCB = engine.createBuffer({ sizeof(FrameConstants), BufferUsage::Uniform });
 	if (!m_vb.valid() || !m_ib.valid() || !m_frameCB.valid())
 	{
 		error = "ビューポートのバッファを作れませんでした";
@@ -118,6 +122,12 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 	m_engine = &engine;
 	m_materials.init(engine, shaders, *m_pipelines, assetRoot);
 	m_materials.setAuto(k_CubeMaterial, standardMaterial({ 1, 1, 1, 1 }, 0.0f, 0.6f));
+	{
+		MaterialDesc shadow;
+		shadow.passes[k_ShadowPass] = k_StandardShadowPipeline;
+		shadow.params = { { "baseColor", { 1.0, 1.0, 1.0, 1.0 } }, { "alphaCutoff", 0.0 } };
+		m_materials.setAuto(k_ShadowFallback, shadow);
+	}
 	// 物体はシーンのファイルから (setScene)
 	return true;
 }
@@ -145,6 +155,9 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 	engine.destroyBuffer(m_vb);
 	engine.destroyBuffer(m_ib);
 	engine.destroyBuffer(m_frameCB);
+	if (m_shadowFrameCB.valid())
+		engine.destroyBuffer(m_shadowFrameCB);
+	m_shadowFrameCB = {};
 	m_vb = m_ib = m_frameCB = {};
 }
 
@@ -228,6 +241,14 @@ void ViewportRenderer::render(GraphicsEngine& engine, IRenderTarget* rt, uint32_
 	fc.viewportSize[2] = 1.0f / static_cast<float>(width);
 	fc.viewportSize[3] = 1.0f / static_cast<float>(height);
 	engine.updateBuffer(m_frameCB, &fc, sizeof(fc));
+	// 影のパス (view "shadow") のフレームの定数: 光の視点の view × projection
+	{
+		FrameConstants sc = fc;
+		sc.viewProj    = m_shadowViewProj;
+		sc.invViewProj = Mat4::inverse(m_shadowViewProj);
+		if (m_shadowFrameCB.valid())
+			engine.updateBuffer(m_shadowFrameCB, &sc, sizeof(sc));
+	}
 
 	gfx::rg::FrameInputs in;
 	in.width    = width;
@@ -297,6 +318,7 @@ MaterialDesc ViewportRenderer::standardMaterial(const std::array<float, 4>& base
 	auto r = [](float v) { return std::round(static_cast<double>(v) * 1e6) / 1e6; };
 	MaterialDesc m;
 	m.passes[k_StandardMaterialPass] = k_StandardMaterialPipeline;
+	m.passes[k_ShadowPass]           = k_StandardShadowPipeline;
 	m.params = { { "baseColor", { r(baseColor[0]), r(baseColor[1]), r(baseColor[2]), r(baseColor[3]) } },
 	             { "metallic", r(metallic) }, { "roughness", r(roughness) }, { "alphaCutoff", 0.0 } };
 	return m;
@@ -320,6 +342,8 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 	const LightLinks          links   = computeLightLinks(scene);
 	std::vector<LightSystem::Light> lights;
 	bool sunFound = false;
+	const SceneLight*    shadowLight = nullptr;
+	std::array<float, 3> shadowDir {};
 	// 定数バッファは使い回し、足りなければ作り、余れば消す (エンジンが GPU の使い終わりまで解放を遅らせる)
 	while (m_objects.size() > scene.objects.size())
 	{
@@ -336,6 +360,7 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 		std::copy(world[i].begin(), world[i].end(), o.world.m);
 		o.box   = o.world;
 		o.light = so.light.has_value();
+		o.castShadow = so.castShadow;
 
 		// ライト (M5-5): 描かず、印の箱 (0.5) と、ライトの定数に入れる
 		if (so.light)
@@ -351,9 +376,17 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 				l.direction = { d[0], d[1], d[2] };
 				l.params    = so.light->params;
 				l.mask      = links.lightMasks[i];
-				lights.push_back(std::move(l));
 				const LightTypeDef* t = m_lights.type(so.light->type);
-				if (!sunFound && t && (t->shape == "directional" || t->id == "directional"))
+				const bool directional = t && (t->shape == "directional" || t->id == "directional");
+				// 影: 影を落とす設定の、最初の平行光源 (今はこれだけ)
+				if (directional && so.light->shadow.enabled && !shadowLight)
+				{
+					l.shadow      = true;
+					shadowLight   = &*so.light;
+					shadowDir     = d;
+				}
+				lights.push_back(std::move(l));
+				if (!sunFound && directional)
 				{
 					m_sunDirection = { d[0], d[1], d[2] };
 					sunFound = true;
@@ -424,6 +457,25 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 	for (const auto& w : links.warnings)
 		m_viewerError += (m_viewerError.empty() ? "" : "\n") + w;
 	m_lights.setLights(std::move(lights));
+	// 影の行列: 影を落とす (描くものがある) 物体全体の箱に合わせる
+	m_shadowActive = shadowLight != nullptr;
+	if (shadowLight)
+	{
+		std::vector<Matrix> boxes;
+		for (size_t i = 0; i < m_objects.size(); ++i)
+		{
+			const Object& o = m_objects[i];
+			if (o.visible && !o.light && o.castShadow && !o.draws.empty())
+			{
+				Matrix b;
+				std::copy(o.box.m, o.box.m + 16, b.begin());
+				boxes.push_back(b);
+			}
+		}
+		const Matrix m = directionalShadowMatrix(shadowDir, boxes);
+		std::copy(m.begin(), m.end(), m_shadowViewProj.m);
+		m_lights.setShadow(m_shadowViewProj, shadowLight->shadow.bias, shadowLight->shadow.normalBias, shadowLight->shadow.softness);
+	}
 }
 
 std::string ViewportRenderer::pick(int x, int y, uint32_t width, uint32_t height, const OrbitCamera& camera) const
@@ -497,31 +549,43 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 	if (!m_engine)
 		return;
 	// layer = マテリアルパス (M5-4)。そのパスを持つマテリアルの物体を、マテリアルのパイプラインで描く (マテリアルの順に並べる)
+	// 影のパス: 影を落とす物体だけ。マテリアルが Shadow パスを持たなければ、標準の影のパイプライン
 	const std::string& pass = query.layer;
-	std::vector<const DrawItem*> items;
+	const bool shadowPass = pass == k_ShadowPass;
+	if (shadowPass && !m_shadowActive)
+		return;   // 影を落とすライトがない
+	const BufferHandle frameCB = ctx.view() == "shadow" ? m_shadowFrameCB : m_frameCB;
+	struct Item { const DrawItem* d; const std::string* material; };
+	static const std::string shadowFallback = k_ShadowFallback;
+	std::vector<Item> items;
 	for (const Object& o : m_objects)
-		if (o.visible)
+		if (o.visible && (!shadowPass || o.castShadow))
 			for (const DrawItem& d : o.draws)
+			{
 				if (m_materials.hasPass(d.material, pass))
-					items.push_back(&d);
-	std::stable_sort(items.begin(), items.end(), [](const DrawItem* a, const DrawItem* b) { return a->material < b->material; });
+					items.push_back({ &d, &d.material });
+				else if (shadowPass)
+					items.push_back({ &d, &shadowFallback });
+			}
+	std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return *a.material < *b.material; });
 
 	const std::string*    current = nullptr;
 	MaterialSystem::Bound bound;
 	bool                  ok = false;
 	uint64_t              lastVb = 0, lastIb = 0;
-	for (const DrawItem* d : items)
+	for (const Item& it : items)
 	{
-		if (!current || *current != d->material)
+		const DrawItem* d = it.d;
+		if (!current || *current != *it.material)
 		{
-			current = &d->material;
-			ok = m_materials.prepare(*m_engine, d->material, pass, ctx.targets, bound);
+			current = it.material;
+			ok = m_materials.prepare(*m_engine, *it.material, pass, ctx.targets, bound);
 			if (!ok)
 				continue;
 			// パイプラインを替えるとルートシグネチャも替わるので、バインドはすべて設定し直す
 			ctx.cb->bindPipeline(bound.pipeline);
 			if (bound.numParams > k_MaterialParamFrame)
-				ctx.cb->setRootDescriptor(k_MaterialParamFrame, m_frameCB, 0);
+				ctx.cb->setRootDescriptor(k_MaterialParamFrame, frameCB, 0);
 			if (bound.constants.valid() && bound.numParams > k_MaterialParamMaterial)
 				ctx.cb->setRootDescriptor(k_MaterialParamMaterial, bound.constants, 0);
 			if (!bound.textures.empty() && bound.numParams > k_MaterialParamTextures)
@@ -550,10 +614,10 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 	}
 }
 
-BufferHandle ViewportRenderer::constants(const std::string& source, const gfx::rg::DrawContext&)
+BufferHandle ViewportRenderer::constants(const std::string& source, const gfx::rg::DrawContext& ctx)
 {
 	if (source == "frame")
-		return m_frameCB;
+		return ctx.view() == "shadow" ? m_shadowFrameCB : m_frameCB;
 	if (source == "lights" && m_engine)   // M5-5: シーンのライト (cbuffer Lights)
 		return m_lights.constants(*m_engine);
 	return {};   // "object" は draw の中でオブジェクトごとにつなぐ

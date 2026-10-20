@@ -69,7 +69,8 @@ Json lightTypeToJson(const LightTypeDef& t);
 // ライトの値 (名前 → 数 / 配列) を 16 個の float に詰める。書いていない / 形が違うものは既定値
 std::vector<float> packLightParams(const LightTypeDef& t, const Json& values, std::vector<std::string>* warnings = nullptr);
 
-// Lighting シェーダーが include する hlsli。types は名前の順に並べたもの (番号 = 並びの位置)。
+// Lighting シェーダーが include する hlsli (cbuffer Lights: ライトの数、影の値 (gShadowInfo / gShadowParams /
+// gShadowViewProj)、ライトの配列)。types は名前の順に並べたもの (番号 = 並びの位置)。
 // 関数のファイルは include する (パスは生成したファイルからの相対: "../../lights/<種類>.light.hlsl")
 std::string generateLightsHlsli(const std::vector<LightTypeDef>& types);
 } // namespace studio

@@ -22,6 +22,8 @@
 //      "light": { "type": "point", "params": { "color": [1, 1, 1], "intensity": 5 }, "links": ["hero"] }
 //    type は lights/<種類>.light.json の種類、params はその値 (書いていないものは既定値)、
 //    links は照らす物体の id (子も含む。空 = すべての物体。ライトリンク)。向きはローカルの -Z
+//    "shadow": { "enabled": true, "bias": 0.001, "normalBias": 0.03, "softness": 1.5 } は影 (今は最初の平行光源だけ)
+//  ・castShadow: false の物体は影を落とさない (書いていなければ落とす)
 //  行列は列優先 (m[列 * 4 + 行]、OrbitCamera.h の Mat4 と同じ)。
 // ============================================================
 
@@ -40,11 +42,21 @@ using Json = nlohmann::json;
 
 constexpr int k_SceneVersion = 1;
 
+struct SceneShadow
+{
+	bool  enabled    = false;
+	float bias       = 0.001f;   // 深さの比較のずれ (影のにじみ / 浮きの調整)
+	float normalBias = 0.03f;    // 法線の向きに押し出す量 (m。斜めの面の縞を消す)
+	float softness   = 1.5f;     // 縁のぼかし (テクセル)
+	bool operator==(const SceneShadow&) const = default;
+};
+
 struct SceneLight
 {
 	std::string              type = "point";
 	Json                     params = Json::object();
 	std::vector<std::string> links;   // 照らす物体の id (空 = すべて)
+	SceneShadow              shadow;
 };
 
 struct SceneObject
@@ -60,6 +72,7 @@ struct SceneObject
 	std::array<float, 4> color    { 1, 1, 1, 1 };   // マテリアルの色に掛ける
 	std::map<std::string, std::string> materials;   // スロット → マテリアルのファイル (書いていなければ取り込んだ値)
 	std::optional<SceneLight> light;                 // あればライト (M5-5)
+	bool                      castShadow = true;     // 影を落とす
 };
 
 struct SceneDesc
@@ -104,8 +117,14 @@ LightLinks computeLightLinks(const SceneDesc& scene);
 // ワールドの行列から、ライトの向き (ローカルの -Z、正規化)
 std::array<float, 3> lightDirection(const Matrix& world);
 
+// 平行光源の影の view × projection (正射影、D3D の深度 0〜1)。boxes (単位の箱をワールドへ写す行列) の全体が
+// 写るように合わせる (カメラに依存しないので、カメラを動かしても影が揺れない)。boxes が空なら単位行列
+Matrix directionalShadowMatrix(const std::array<float, 3>& direction, const std::vector<Matrix>& boxes);
+// 列優先の行列で点を写す (w で割る)
+std::array<float, 3> transformPoint(const Matrix& m, const std::array<float, 3>& p);
+
 // 新しいプロジェクトの既定のシーン (M4 までの固定の立方体と同じ並び: 中央の大きな立方体 + 周りの 48 個、
-// M5-5 からは今までの光と同じ向きの平行光源 "Sun")
+// 影を受ける地面 "Ground" (薄い箱)、今までの光と同じ向きの、影を落とす平行光源 "Sun" (最後))
 SceneDesc defaultScene();
 
 // 使われていない id を作る ("cube-12" など)

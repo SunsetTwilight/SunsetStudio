@@ -6,9 +6,10 @@
 //    lightParam      ライトの値 (書いていなければ種類の既定値) を数の配列で
 //    withLightParam / withLightType / withLightLinks  シーンのライトを 1 か所だけ変える
 //    linkCandidates  照らす物体に選べるもの (ライト以外)
+//    lightShadow / withLightShadow  影の値 (書いていなければ既定値)
 // ============================================================
 import { call, isConnected } from '../bridge/client';
-import type { JsonValue, LightTypeInfo, SceneJson, SceneLightJson, SceneObjectJson } from '../bridge/protocol';
+import type { JsonValue, LightTypeInfo, SceneJson, SceneLightJson, SceneObjectJson, SceneShadowJson } from '../bridge/protocol';
 import { uniqueId } from './scene';
 import { studioStore } from './store';
 
@@ -73,6 +74,16 @@ export function withLightLinks(scene: SceneJson, id: string, links: string[]): S
     else delete next.links;
     return next;
   });
+}
+
+export const DEFAULT_SHADOW: SceneShadowJson = { enabled: false, bias: 0.001, normalBias: 0.03, softness: 1.5 };
+
+export function lightShadow(obj: SceneObjectJson): SceneShadowJson {
+  return { ...DEFAULT_SHADOW, ...(obj.light?.shadow ?? {}) };
+}
+
+export function withLightShadow(scene: SceneJson, id: string, patch: Partial<SceneShadowJson>): SceneJson {
+  return mapLight(scene, id, (l) => ({ ...l, shadow: { ...DEFAULT_SHADOW, ...(l.shadow ?? {}), ...patch } }));
 }
 
 export function linkCandidates(scene: SceneJson): SceneObjectJson[] {

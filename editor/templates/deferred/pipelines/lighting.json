@@ -12,8 +12,11 @@
       { "parameterType": "CBV", "shaderRegister": 2 }
     ],
     "numParameters": 3,
-    "ranges": [ { "rangeType": "SRV", "numDescriptors": 4, "flags": [ "DescriptorsVolatile" ] } ],
-    "numRanges": 1
+    "ranges": [ { "rangeType": "SRV", "numDescriptors": 5, "flags": [ "DescriptorsVolatile" ] } ],
+    "numRanges": 1,
+    "staticSamplers": [ { "filter": "ComparisonMinMagLinearMipPoint", "addressU": "Border", "addressV": "Border", "addressW": "Border",
+                          "comparisonFunc": "LessEqual", "borderColor": "OpaqueWhite", "shaderVisibility": "Pixel" } ],
+    "numStaticSamplers": 1
   },
   "state": {
     "rasterizerState": { "cullMode": "None" },

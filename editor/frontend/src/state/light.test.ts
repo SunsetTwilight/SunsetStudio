@@ -3,7 +3,7 @@
 // ============================================================
 import { describe, expect, it } from 'vitest';
 import type { LightTypeInfo, SceneJson } from '../bridge/protocol';
-import { lightParam, linkCandidates, newLight, withLightLinks, withLightParam, withLightType } from './light';
+import { lightParam, lightShadow, linkCandidates, newLight, withLightLinks, withLightParam, withLightShadow, withLightType } from './light';
 import { newObject } from './scene';
 
 const point: LightTypeInfo = {
@@ -55,5 +55,13 @@ describe('ライト', () => {
     s = withLightLinks(s, 'point-1', []);
     expect(s.objects[1].light && 'links' in s.objects[1].light).toBe(false);
     expect(linkCandidates(s).map((o) => o.id)).toEqual(['hero']);
+  });
+
+  it('影: 書いていなければ既定値、変えた所だけ上書き', () => {
+    let s: SceneJson = { ...base, objects: [...base.objects, newLight(base, sun)] };
+    expect(lightShadow(s.objects[1])).toEqual({ enabled: false, bias: 0.001, normalBias: 0.03, softness: 1.5 });
+    s = withLightShadow(s, 'directional-1', { enabled: true });
+    s = withLightShadow(s, 'directional-1', { softness: 3 });
+    expect(s.objects[1].light?.shadow).toEqual({ enabled: true, bias: 0.001, normalBias: 0.03, softness: 3 });
   });
 });
