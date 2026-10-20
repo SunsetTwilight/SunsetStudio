@@ -26,6 +26,9 @@ namespace sa = sunset::asset;
 
 namespace
 {
+// 半透明 (Blend) のスロットの取り込んだ値のマテリアルで、描かないアルファの境目
+constexpr double k_BlendAlphaCutoff = 0.01;
+
 Json modelInfo(const sa::Model& m)
 {
 	size_t vertices = 0, triangles = 0, morphs = 0;
@@ -157,6 +160,9 @@ std::vector<MaterialDesc> EditorApp::slotMaterials(const std::string& modelId, c
 		MaterialDesc m = ViewportRenderer::standardMaterial(slot.baseColor, slot.metallic, slot.roughness);
 		if (slot.alphaMode == sa::AlphaMode::Mask)
 			m.params["alphaCutoff"] = std::round(static_cast<double>(slot.alphaCutoff) * 1e6) / 1e6;
+		// 半透明: ディファードでは混ぜられないので、ほぼ透明なところだけ描かない (MMD の表情の材質はアルファ 0 で隠れている)
+		else if (slot.alphaMode == sa::AlphaMode::Blend)
+			m.params["alphaCutoff"] = k_BlendAlphaCutoff;
 		// 参照しているテクスチャが取り込まれていれば使う (標準のマテリアルの変数名。glTF と同じ意味)
 		auto tex = [&](const char* name, const sa::TextureRef& ref) {
 			if (!rec || !ref.used())
