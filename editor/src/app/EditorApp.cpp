@@ -319,8 +319,38 @@ int EditorApp::run()
 					{
 						log("error", "smoke", "テンプレートからプロジェクトを作れません: " + r.dump());
 						m_smokeProjectFailed = true;
+						return checkSmokeTest();
 					}
-					checkSmokeTest();
+					// テンプレートのシーンは地面と平行光源だけ (立方体なし)。
+					// あとの確認は中央の立方体を使うので、既定のシーン (立方体 49 個 + 地面 + 平行光源) に置き換えて保存する
+					if (m_sceneData.objects.size() != 2 || !m_sceneData.find("ground") || !m_sceneData.find("sun"))
+					{
+						log("error", "smoke", "テンプレートのシーンが地面と平行光源だけではありません");
+						m_smokeProjectFailed = true;
+						return checkSmokeTest();
+					}
+					m_host.bridge().callLocal("scene.set", { { "scene", sceneToJson(defaultScene()) }, { "label", "既定のシーン" } },
+						[this](int s1, const Json& r1) {
+							m_host.post([this, s1, r1] {
+								if (s1 != 0)
+								{
+									log("error", "smoke", "scene.set (既定のシーン): " + r1.dump());
+									m_smokeProjectFailed = true;
+									return checkSmokeTest();
+								}
+								m_host.bridge().callLocal("scene.save", Json::object(), [this](int s2, const Json& r2) {
+									m_host.post([this, s2, r2] {
+										if (s2 != 0)
+										{
+											log("error", "smoke", "scene.save (既定のシーン): " + r2.dump());
+											m_smokeProjectFailed = true;
+										}
+										m_smokeSceneReady = true;
+										checkSmokeTest();
+									});
+								});
+							});
+						});
 				});
 			});
 	}
@@ -694,7 +724,7 @@ void EditorApp::checkSmokeTest()
 	case SmokeStage::WaitProject:
 		if (m_smokeProjectFailed)
 			return finish(8, "テンプレートからプロジェクトを作って開けない");
-		if (!m_project)
+		if (!m_project || !m_smokeSceneReady)
 			return;
 		m_smokeStage = SmokeStage::WaitFrames;
 		[[fallthrough]];

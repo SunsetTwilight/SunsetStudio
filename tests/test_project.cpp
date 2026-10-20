@@ -178,6 +178,29 @@ TEST_CASE("プロジェクト: 空のテンプレート (背景だけのグラ�
 	fs::remove_all(root);
 }
 
+TEST_CASE("プロジェクト: ディファードのテンプレートのシーンは地面と平行光源だけ")
+{
+	std::ifstream f(fs::path(STUDIO_TEMPLATE_SOURCE_DIR) / "deferred" / "scenes" / "main.scene.json", std::ios::binary);
+	REQUIRE(f);
+	const Json json = Json::parse(std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>()));
+	SceneDesc scene;
+	SceneDiagnostics diag;
+	REQUIRE(sceneFromJson(json, scene, diag));
+	CHECK(diag.warnings.empty());
+	REQUIRE(scene.objects.size() == 2);
+	const SceneObject* ground = scene.find("ground");
+	const SceneObject* sun    = scene.find("sun");
+	REQUIRE(ground);
+	REQUIRE(sun);
+	CHECK(ground->model == "builtin:cube");
+	REQUIRE(sun->light);
+	CHECK(sun->light->type == "directional");
+	CHECK(sun->light->shadow.enabled);
+	// 既定のシーン (古いプロジェクト用) の地面と平行光源と同じ
+	const SceneDesc def = defaultScene();
+	CHECK(sceneToJson({ 1, { *def.find("ground"), *def.find("sun") }, {} }) == sceneToJson(scene));
+}
+
 TEST_CASE("プロジェクト: 最近のプロジェクトの一覧")
 {
 	const fs::path root = freshDir("studio_tests_recent");

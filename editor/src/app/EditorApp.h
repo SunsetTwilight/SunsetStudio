@@ -172,6 +172,7 @@ private:
 	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, Windows, Shader, WaitAfter, EmptyProject, EmptyFrames, Finished };
 	SmokeStage m_smokeStage    = SmokeStage::WaitProject;
 	bool       m_smokeProjectFailed = false;
+	bool       m_smokeSceneReady    = false;   // テンプレートのシーンを既定のシーン (立方体 49 個) に置き換えた
 	uint32_t   m_smokeErrorMark     = 0;   // 空のプロジェクトを開く前の、描画のエラーの数
 	std::filesystem::path m_smokeDir;   // スモークテストのプロジェクト (一時フォルダ。終了時に消す)
 

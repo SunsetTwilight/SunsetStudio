@@ -533,7 +533,7 @@ MyWork/
 
 | 項目 | 内容 |
 |------|------|
-| ファイル | `scenes/main.scene.json` (`.sunsetproj` の `viewport.scene`)。`{ version, objects: [ { id, name, model, parent, position, rotation, scale, visible, color, layer } ], editor }`。回転はオイラー角 (度、X → Y → Z の順。world = 親 × T × Rz × Ry × Rx × S)。親子はデータとして持ち、描画で親の変換を掛け、親が見えなければ子も見えない。`model` は `builtin:cube` か、取り込んだモデルの `asset:<ID>` (M5-3)。`color` と `layer` は M5-2 では仮の項目だった (M5-4 で `layer` はスロットのマテリアルに置き換え、`color` はマテリアルに掛ける色にした)。ファイルがなければ、今までの固定の立方体と同じ並び (49 個) の既定のシーンを書く |
+| ファイル | `scenes/main.scene.json` (`.sunsetproj` の `viewport.scene`)。`{ version, objects: [ { id, name, model, parent, position, rotation, scale, visible, color, layer } ], editor }`。回転はオイラー角 (度、X → Y → Z の順。world = 親 × T × Rz × Ry × Rx × S)。親子はデータとして持ち、描画で親の変換を掛け、親が見えなければ子も見えない。`model` は `builtin:cube` か、取り込んだモデルの `asset:<ID>` (M5-3)。`color` と `layer` は M5-2 では仮の項目だった (M5-4 で `layer` はスロットのマテリアルに置き換え、`color` はマテリアルに掛ける色にした)。ファイルがなければ、今までの固定の立方体と同じ並び (49 個) の既定のシーンを書く。テンプレート `deferred` は地面と平行光源 (影つき) だけのシーンを持つので、新しく作ったプロジェクトに立方体は入らない (スモークテストは作ったあとに既定のシーンに置き換えて保存してから確認する) |
 | 検証 | `services/Scene` (単体テスト): 型の違い、id の重複 / 不正 (英数字と - _ .)、ない親、親子の循環はエラー。知らないキーとモデルは警告。読めないシーンは空にして、編集と保存を断る (上書きしない) |
 | 描画 | `ViewportRenderer::setScene`: 物体ごとの定数バッファ (ワールド行列と色) を使い回して更新する。`drawList` のパスは、layer が同じで見えている物体を描く (`Grid` は今までどおり)。選んだ物体には `SelectionOutline` (箱の 12 本の辺、深度を見ない線、橙) を重ねる (リソースビューアーの表示中は描かない) |
 | 選択 | ビューポートを左クリック (ほとんど動かさずに離す) すると、描画スレッドでカメラの光線と物体の箱 (回転と拡大を含む) を CPU で判定し (`pickObject`)、`scene.picked` で UI に知らせる。シーンのパネルとインスペクターで選んだ物も `scene.select` でビューポートに伝える |
