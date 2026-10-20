@@ -1404,24 +1404,30 @@ button.link:disabled {
   flex: 1;
   min-width: 0;
 }
-/* 描画レイヤー (どの描画ノードでメッシュを描くか) */
+/* 描画レイヤー (どの描画ノードでメッシュを描くか): 1 行に 1 つのドロップダウン、横に ＋ / × */
 .draw-layers {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+  flex-direction: column;
+  gap: 3px;
   min-width: 0;
 }
-.draw-layer-list {
+.draw-layer-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px 10px;
-}
-.draw-layer {
-  display: inline-flex;
   align-items: center;
-  gap: 3px;
-  white-space: nowrap;
+  gap: 4px;
+  min-width: 0;
+}
+.draw-layer-row select {
+  flex: 1;
+  min-width: 0;
+}
+.draw-layer-add,
+.draw-layer-remove,
+.draw-layer-spacer {
+  flex: none;
+  width: 24px;
+  padding: 0;
+  text-align: center;
 }
 .material-unused,
 .object-slots-note {

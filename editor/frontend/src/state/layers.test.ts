@@ -3,7 +3,7 @@
 // ============================================================
 import { describe, expect, it } from 'vitest';
 import type { JsonObject, SceneJson } from '../bridge/protocol';
-import { graphDrawLayers, isUndrawn, objectDrawLayers, slotDrawLayers, toggleLayer, withObjectLayers, withSlotLayers } from './layers';
+import { graphDrawLayers, isUndrawn, objectDrawLayers, slotDrawLayers, nextUnusedLayer, removeLayerAt, setLayerAt, withObjectLayers, withSlotLayers } from './layers';
 import { newObject } from './scene';
 
 const graph: JsonObject = {
@@ -42,12 +42,15 @@ describe('描画レイヤー', () => {
     expect('slotLayers' in back).toBe(false);
   });
 
-  it('どこにも描かれないか / 足す・外す', () => {
+  it('どこにも描かれないか / 替える・外す・足す', () => {
     const avail = graphDrawLayers(graph);
     expect(isUndrawn([], avail)).toBe(true);
     expect(isUndrawn(['Missing'], avail)).toBe(true);
     expect(isUndrawn(['Missing', 'Toon'], avail)).toBe(false);
-    expect(toggleLayer(['Missing', 'Toon'], 'Opaque', true, avail)).toEqual(['Opaque', 'Toon', 'Missing']);
-    expect(toggleLayer(['Opaque', 'Toon'], 'Opaque', false, avail)).toEqual(['Toon']);
+    expect(setLayerAt(['Opaque', 'Missing'], 1, 'Toon')).toEqual(['Opaque', 'Toon']);
+    expect(setLayerAt(['Opaque', 'Toon'], 1, 'Opaque')).toEqual(['Opaque']); // 同じものは重ねない
+    expect(removeLayerAt(['Opaque', 'Toon'], 0)).toEqual(['Toon']);
+    expect(nextUnusedLayer(['Opaque'], avail)).toBe('Toon');
+    expect(nextUnusedLayer(['Opaque', 'Toon'], avail)).toBeNull();
   });
 });

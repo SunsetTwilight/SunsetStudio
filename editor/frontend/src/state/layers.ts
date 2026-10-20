@@ -52,13 +52,20 @@ export function isUndrawn(layers: string[], available: DrawLayerInfo[]): boolean
   return !layers.some((l) => available.some((a) => a.layer === l));
 }
 
-// レイヤーを 1 つ足す / 外す (順はグラフの順にそろえ、グラフにないものは後ろに残す)
-export function toggleLayer(layers: string[], layer: string, on: boolean, available: DrawLayerInfo[]): string[] {
-  const set = new Set(layers);
-  if (on) set.add(layer);
-  else set.delete(layer);
-  const known = available.map((a) => a.layer).filter((l) => set.has(l));
-  return [...known, ...[...set].filter((l) => !known.includes(l))];
+// i 番目のレイヤーを替える (ほかの行と同じなら、その行を消して重ねない)
+export function setLayerAt(layers: string[], index: number, layer: string): string[] {
+  const next = layers.map((l, i) => (i === index ? layer : l));
+  return next.filter((l, i) => l !== layer || i === index);
+}
+
+// i 番目のレイヤーを外す
+export function removeLayerAt(layers: string[], index: number): string[] {
+  return layers.filter((_, i) => i !== index);
+}
+
+// 追加ボタンで足すレイヤー: まだ使っていない、グラフの最初のレイヤー (なければ null)
+export function nextUnusedLayer(layers: string[], available: DrawLayerInfo[]): string | null {
+  return available.find((a) => !layers.includes(a.layer))?.layer ?? null;
 }
 
 // 物体の layers を変える (undefined = 既定に戻す)
