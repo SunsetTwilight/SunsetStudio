@@ -43,6 +43,6 @@ const std::vector<AssetTemplate>& assetTemplates();
 const AssetTemplate*              findAssetTemplate(const std::string& id);
 
 // テンプレートの中身。パイプラインのテンプレートでは shader に PS (Compute なら CS) のアセットのパスを入れる。
-// テンプレートがなければ false
-bool assetTemplateText(const std::string& id, const std::string& shader, std::string& out);
+// 描画ノードのパイプライン ("pipeline.draw") は vs に VS のパスも入れる。テンプレートがなければ false
+bool assetTemplateText(const std::string& id, const std::string& shader, std::string& out, const std::string& vs = {});
 } // namespace studio

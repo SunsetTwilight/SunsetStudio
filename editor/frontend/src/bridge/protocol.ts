@@ -452,7 +452,7 @@ export interface Methods {
   'asset.read': { params: { path: string }; result: { path: string; text: string } };
   'asset.write': { params: { path: string; text: string; create?: boolean }; result: { path: string } };
   'asset.templates': { params: Record<string, never>; result: { templates: AssetTemplate[] } };
-  'asset.create': { params: { template: string; path: string; shader?: string }; result: { path: string; text: string } };
+  'asset.create': { params: { template: string; path: string; shader?: string; vs?: string }; result: { path: string; text: string } };
   'asset.openExternal': { params: { path: string; app: 'default' | 'vscode'; line?: number }; result: { opened: boolean } };
   'shader.compile': {
     params: { path: string; text?: string; stage?: 'vs' | 'ps' | 'cs'; entry?: string; profile?: string };

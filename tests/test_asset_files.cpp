@@ -4,6 +4,8 @@
 #include <doctest/doctest.h>
 #include "services/AssetFiles.h"
 
+#include <nlohmann/json.hpp>
+
 #include <filesystem>
 #include <fstream>
 
@@ -72,6 +74,21 @@ TEST_CASE("テンプレート")
 	}
 	CHECK(assetTemplateText("pipeline.fullscreen", "shaders/mine.ps.hlsl", text));
 	CHECK(text.find("\"shaders/mine.ps.hlsl\"") != std::string::npos);
+	// 描画ノードのパイプラインは VS と PS の両方を入れる (JSON として読める)
+	CHECK(assetTemplateText("pipeline.draw", "shaders/toon.ps.hlsl", text, "shaders/toon.vs.hlsl"));
+	CHECK(text.find("\"shaders/toon.vs.hlsl\"") != std::string::npos);
+	CHECK(text.find("\"shaders/toon.ps.hlsl\"") != std::string::npos);
+	CHECK_NOTHROW((void)nlohmann::json::parse(text));
+	CHECK(text.find("depthEnable") == std::string::npos);
+	REQUIRE(assetTemplateText("pipeline.draw.nodepth", "shaders/toon.ps.hlsl", text, "shaders/toon.vs.hlsl"));
+	CHECK(nlohmann::json::parse(text)["state"]["depthStencilState"]["depthEnable"] == false);
+	// 描画ノードのシェーダーは include しない (空のテンプレートには common.hlsli がない)
+	for (const char* id : { "shader.draw.vs", "shader.draw.ps" })
+	{
+		REQUIRE(assetTemplateText(id, "", text));
+		CHECK(text.find("#include") == std::string::npos);
+		CHECK(text.find("cbuffer Frame") != std::string::npos);
+	}
 	CHECK_FALSE(assetTemplateText("nope", "", text));
 	CHECK(findAssetTemplate("nope") == nullptr);
 }

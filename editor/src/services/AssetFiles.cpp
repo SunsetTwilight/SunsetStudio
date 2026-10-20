@@ -144,6 +144,89 @@ float4 main(PSIn i) : SV_Target0
 }
 )hlsl";
 
+// 描画ノード (メッシュを描く drawList のパス) の既定のシェーダー。バインドは標準のマテリアルと同じ約束:
+// b0 = 物体、b1 = フレーム、b2 = cbuffer Material、t0〜 = テクスチャ、s0 = 静的サンプラー。
+// マテリアルがこのレイヤーのパイプラインを持たないとき、cbuffer Material とテクスチャは名前で合わせて渡される
+// 描画ノードのシェーダーは common.hlsli を include しない (空のテンプレートのプロジェクトにはない)。
+// 物体とフレームの定数は、エディターが渡す並び (render/ViewportRenderer.cpp、common.hlsli と同じ) をここに書く
+#define DRAW_NODE_CONSTANTS R"hlsl(
+cbuffer Object : register(b0)   // 物体 (エディターが描画ごとにつなぐ)
+{
+	float4x4 gWorld;
+	float4   gColor;       // 物体の色 (マテリアルの色に掛ける)
+	uint4    gLightMask;
+};
+
+cbuffer Frame : register(b1)    // フレーム (グラフの constants の "frame")
+{
+	float4x4 gViewProj;
+	float4x4 gInvViewProj;
+	float4   gCameraPos;
+	float4   gLightDir;    // xyz: 最初の平行光源の光が進む向き
+	float4   gViewportSize;
+};
+)hlsl"
+
+const char* k_DrawVS = R"hlsl(// 描画ノードの頂点シェーダー (b0: 物体、b1: フレーム)
+)hlsl" DRAW_NODE_CONSTANTS R"hlsl(
+
+struct VSIn
+{
+	float3 pos     : POSITION;
+	float3 normal  : NORMAL;
+	float4 tangent : TANGENT;
+	float2 uv      : TEXCOORD0;
+};
+struct VSOut
+{
+	float4 pos    : SV_Position;
+	float3 normal : NORMAL;
+	float2 uv     : TEXCOORD0;
+};
+
+VSOut main(VSIn v)
+{
+	VSOut o;
+	o.pos    = mul(gViewProj, mul(gWorld, float4(v.pos, 1)));
+	o.normal = mul((float3x3)gWorld, v.normal);
+	o.uv     = v.uv;
+	return o;
+}
+)hlsl";
+
+const char* k_DrawPS = R"hlsl(// 描画ノードのピクセルシェーダー: 基本色 × テクスチャ × 物体の色を、最初の平行光源の向きで簡単に照らす
+//   cbuffer Material の変数とテクスチャは、マテリアルの値 (標準のマテリアルなら baseColor / alphaCutoff / baseColorMap) が
+//   名前で合わせて入る。変数を足すと、マテリアルのタブとインスペクターに欄が出る
+)hlsl" DRAW_NODE_CONSTANTS R"hlsl(
+
+cbuffer Material : register(b2)
+{
+	float4 baseColor;
+	float  metallic;      // 標準のマテリアルと並びを合わせる (使わない)
+	float  roughness;
+	float  alphaCutoff;   // 0 より大きければ、アルファがこれより小さい所を描かない
+};
+
+Texture2D    baseColorMap : register(t0);
+SamplerState gSampler     : register(s0);
+
+struct PSIn
+{
+	float4 pos    : SV_Position;
+	float3 normal : NORMAL;
+	float2 uv     : TEXCOORD0;
+};
+
+float4 main(PSIn i) : SV_Target0
+{
+	const float4 c = baseColor * baseColorMap.Sample(gSampler, i.uv) * gColor;
+	if (alphaCutoff > 0 && c.a < alphaCutoff)
+		discard;
+	const float ndl = saturate(dot(normalize(i.normal), -gLightDir.xyz));
+	return float4(c.rgb * (0.25 + 0.75 * ndl), 1);
+}
+)hlsl";
+
 const char* k_ComputeCS = R"hlsl(// コンピュートシェーダー: 入力 (t0) を読んで出力 (u0) に書く
 Texture2D<float4>   gInput  : register(t0);
 RWTexture2D<float4> gOutput : register(u0);
@@ -185,6 +268,48 @@ std::string fullscreenPipeline(const std::string& ps)
 )";
 }
 
+// depth = false: 深度を使わない (出力が $backbuffer だけのとき。アプリの出力とグラフの深度は 1 つのパスに混ぜられない)
+std::string drawPipeline(const std::string& vs, const std::string& ps, bool depth)
+{
+	return R"({
+  "version": 1,
+  "type": "graphics",
+  "shaders": {
+    "vs": { "file": ")" + vs + R"(" },
+    "ps": { "file": ")" + ps + R"(" }
+  },
+  "layout": {
+    "parameters": [
+      { "parameterType": "CBV", "shaderRegister": 0 },
+      { "parameterType": "CBV", "shaderRegister": 1 },
+      { "parameterType": "CBV", "shaderRegister": 2 },
+      { "parameterType": "DescriptorTable", "shaderVisibility": "Pixel", "firstRange": 0, "numRanges": 1 }
+    ],
+    "numParameters": 4,
+    "ranges": [ { "rangeType": "SRV", "numDescriptors": 1, "flags": [ "DescriptorsVolatile" ] } ],
+    "numRanges": 1,
+    "staticSamplers": [ { "filter": "MinMagMipLinear", "shaderVisibility": "Pixel" } ],
+    "numStaticSamplers": 1,
+    "flags": [ "AllowInputAssemblerInputLayout" ]
+  },
+  "state": {
+    "rasterizerState": { "cullMode": "Back", "frontCounterClockwise": true },)" +
+	       std::string(depth ? "" : R"(
+    "depthStencilState": { "depthEnable": false, "depthWriteMask": "Zero" },)") + R"(
+    "inputLayout": {
+      "elements": [
+        { "semanticName": "POSITION", "format": "R32G32B32_Float",    "alignedByteOffset": 0 },
+        { "semanticName": "NORMAL",   "format": "R32G32B32_Float",    "alignedByteOffset": 12 },
+        { "semanticName": "TANGENT",  "format": "R32G32B32A32_Float", "alignedByteOffset": 24 },
+        { "semanticName": "TEXCOORD", "format": "R32G32_Float",       "alignedByteOffset": 40 }
+      ],
+      "elementCount": 4
+    }
+  }
+}
+)";
+}
+
 std::string computePipeline(const std::string& cs)
 {
 	return R"({
@@ -217,8 +342,12 @@ const std::vector<AssetTemplate>& assetTemplates()
 		{ "shader.raster.vs",     "shader",   "メッシュの VS",      "shaders",   ".vs.hlsl", "vs", "頂点を変換する (GBuffer のようなパス)" },
 		{ "shader.raster.ps",     "shader",   "メッシュの PS",      "shaders",   ".ps.hlsl", "ps", "メッシュの色を出す" },
 		{ "shader.compute.cs",    "shader",   "Compute",            "shaders",   ".cs.hlsl", "cs", "テクスチャを読んで UAV に書く" },
+		{ "shader.draw.vs",       "shader",   "描画ノードの VS",    "shaders",   ".vs.hlsl", "vs", "メッシュの頂点を変換する (位置 / 法線 / UV を渡す)" },
+		{ "shader.draw.ps",       "shader",   "描画ノードの PS",    "shaders",   ".ps.hlsl", "ps", "マテリアルの基本色とテクスチャを、平行光源で簡単に照らす" },
 		{ "pipeline.fullscreen",  "pipeline", "全画面のパイプライン", "pipelines", ".json",    "",   "fullscreen.vs.hlsl + 選んだ PS、SRV 1 つ" },
 		{ "pipeline.compute",     "pipeline", "Compute のパイプライン", "pipelines", ".json",    "",   "選んだ CS、SRV 1 つ + UAV 1 つ" },
+		{ "pipeline.draw",        "pipeline", "描画ノードのパイプライン", "pipelines", ".json",    "",   "選んだ VS / PS、物体 / フレーム / マテリアルの定数 + テクスチャ 1 つ (標準のマテリアルと同じ約束)" },
+		{ "pipeline.draw.nodepth", "pipeline", "描画ノードのパイプライン (深度なし)", "pipelines", ".json", "", "上と同じで深度を使わない ($backbuffer に直接描くとき)" },
 	};
 	return list;
 }
@@ -231,8 +360,13 @@ const AssetTemplate* findAssetTemplate(const std::string& id)
 	return nullptr;
 }
 
-bool assetTemplateText(const std::string& id, const std::string& shader, std::string& out)
+bool assetTemplateText(const std::string& id, const std::string& shader, std::string& out, const std::string& vs)
 {
+	if (id == "shader.draw.vs")       return out = k_DrawVS, true;
+	if (id == "shader.draw.ps")       return out = k_DrawPS, true;
+	if (id == "pipeline.draw" || id == "pipeline.draw.nodepth")
+		return out = drawPipeline(vs.empty() ? std::string("shaders/draw.vs.hlsl") : vs, shader.empty() ? std::string("shaders/draw.ps.hlsl") : shader,
+		                          id == "pipeline.draw"), true;
 	if (id == "shader.fullscreen.ps") return out = k_FullscreenPS, true;
 	if (id == "shader.raster.vs")     return out = k_RasterVS, true;
 	if (id == "shader.raster.ps")     return out = k_RasterPS, true;

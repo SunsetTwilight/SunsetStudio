@@ -37,11 +37,14 @@ import { NewShaderDialog } from '../panels/NewShaderDialog';
 import { applyGraph } from '../state/graph';
 import { studioStore, useStudio } from '../state/store';
 import {
+  addDrawPass,
   addPass,
   addResource,
   autoLayout,
   buildModel,
   connect,
+  drawNodeNames,
+  drawNodeTarget,
   parseNodeId,
   previewTargets,
   removeEdges,
@@ -306,6 +309,31 @@ function NodeEditor() {
     const r = addPass(graph.graph, kind, pipeline, at);
     void apply(r.graph, `パス ${r.name} を追加`).then((ok) => ok && studioStore.select({ kind: 'pass', name: r.name }));
   };
+  // 描画ノード: 既定の VS / PS / パイプラインをテンプレートから作り、メッシュを描くパス (layer = ノードの名前) を加える
+  const doAddDrawNode = async (at: XY) => {
+    setMenu(null);
+    if (!graph) return;
+    try {
+      const files = (await call('asset.list', { dir: '', extensions: ['.hlsl', '.json'] })).files;
+      const n = drawNodeNames(graph.graph, files);
+      setStatus({ kind: 'busy', text: `描画ノード ${n.name} のシェーダーとパイプラインを作っています…` });
+      await call('asset.create', { template: 'shader.draw.vs', path: n.vs });
+      await call('asset.create', { template: 'shader.draw.ps', path: n.ps });
+      const target = drawNodeTarget(graph.graph);
+      await call('asset.create', { template: target.depth ? 'pipeline.draw' : 'pipeline.draw.nodepth', path: n.pipeline, shader: n.ps, vs: n.vs });
+      if (!(await apply(addDrawPass(graph.graph, n.name, n.pipeline, at), `描画ノード ${n.name} を追加`))) return;
+      studioStore.select({ kind: 'pass', name: n.name });
+      void loadPipelineShaders([...graph.pipelines, n.pipeline]);
+      setStatus({
+        kind: 'ok',
+        text:
+          `描画ノード ${n.name} を追加しました (${n.vs}、${n.ps}、${n.pipeline})。物体のインスペクターの描画レイヤーで ${n.name} を選ぶと、このノードで描きます` +
+          (target.depth ? '' : '。sceneColor がないので $backbuffer に深度なしで描きます'),
+      });
+    } catch (e) {
+      setStatus({ kind: 'error', text: e instanceof Error ? e.message : String(e) });
+    }
+  };
   const doAddResource = (kind: 'texture' | 'buffer', at: XY) => {
     setMenu(null);
     if (!graph) return;
@@ -327,6 +355,9 @@ function NodeEditor() {
       <header className="panel-header">
         <span className="panel-title">ノードエディター</span>
         <span className="spacer" />
+        <button onClick={() => void doAddDrawNode(centerOfView())} title="メッシュを描くノードを加える (既定の VS / PS / パイプラインも作る。描画レイヤーの名前はノードの名前)">
+          ＋ 描画ノード
+        </button>
         <button onClick={() => doAddPass('Raster', centerOfView())} title="Raster のパス (全画面) を加える">＋ パス</button>
         <button onClick={() => doAddResource('texture', centerOfView())} title="テクスチャを加える">＋ リソース</button>
         <button onClick={relayout} title="パスとリソースを、書く → 読むの順に左から右へ並べ直す">自動配置</button>
@@ -375,6 +406,7 @@ function NodeEditor() {
         {menu && (
           <FloatingMenu className="rf-menu" x={menu.x} y={menu.y}>
             <div className="rf-menu-title">パスを追加</div>
+            <button onClick={() => void doAddDrawNode(menu.at)} title="既定の VS / PS / パイプラインも作る">描画ノード (メッシュ)</button>
             <button onClick={() => doAddPass('Raster', menu.at)}>Raster (全画面)</button>
             <button onClick={() => doAddPass('Compute', menu.at)}>Compute</button>
             <button onClick={() => doAddPass('Copy', menu.at)}>Copy</button>

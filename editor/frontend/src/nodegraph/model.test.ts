@@ -5,11 +5,14 @@ import { describe, expect, it } from 'vitest';
 import type { JsonObject } from '../bridge/protocol';
 import { asArray, asObject, passesOf } from '../state/graph';
 import {
+  addDrawPass,
   addPass,
   addResource,
   autoLayout,
   buildModel,
   connect,
+  drawNodeNames,
+  drawNodeTarget,
   previewTargets,
   removeEdges,
   removeNodes,
@@ -141,6 +144,46 @@ describe('削除と追加', () => {
     expect(pass(c.graph, 'Copy').pipeline).toBeUndefined();
     const t = addResource(graph, 'buffer', [0, 0]);
     expect(asObject(t.graph.resources)[t.name]).toEqual({ kind: 'buffer', bytes: 256 });
+  });
+});
+
+describe('描画ノード', () => {
+  it('名前はパスとファイルに重ならないものを選ぶ', () => {
+    expect(drawNodeNames(graph, [])).toEqual({ name: 'Draw', vs: 'shaders/draw.vs.hlsl', ps: 'shaders/draw.ps.hlsl', pipeline: 'pipelines/draw.json' });
+    expect(drawNodeNames(graph, ['shaders/draw.ps.hlsl']).name).toBe('Draw2');
+    const g = addDrawPass(graph, 'Draw', 'pipelines/draw.json', [0, 0]);
+    expect(drawNodeNames(g, []).name).toBe('Draw2');
+  });
+
+  it('ディファード: sceneColor と depth に書き、Lighting のあと Composite の前に入る', () => {
+    const g = addDrawPass(graph, 'Draw', 'pipelines/draw.json', [3, 4]);
+    expect(passesOf(g).map((p) => p.name)).toEqual(['GBuffer', 'Lighting', 'Draw', 'Composite']);
+    expect(pass(g, 'Draw')).toMatchObject({ type: 'Raster', pipeline: 'pipelines/draw.json', content: { drawList: { layer: 'Draw' } } });
+    expect(refs(g, 'Draw', 'outputs')).toEqual([
+      { res: 'sceneColor', as: 'RTV0', load: 'load' },
+      { res: 'depth', as: 'DSV', load: 'load' },
+    ]);
+    expect(savedPositions(g)['pass:Draw']).toEqual([3, 4]);
+  });
+
+  it('sceneColor はあるが depth がなければ、depth を作ってクリアする', () => {
+    const noDepth: JsonObject = { ...graph, resources: { sceneColor: { format: 'R16G16B16A16_Float', size: { relative: 1 } } } };
+    const g = addDrawPass(noDepth, 'Draw', 'pipelines/draw.json', [0, 0]);
+    expect(refs(g, 'Draw', 'outputs')[1]).toEqual({ res: 'depth', as: 'DSV', load: 'clear' });
+    expect(asObject(g.resources).depth).toMatchObject({ format: 'D32_Float' });
+  });
+
+  it('空のグラフ: $backbuffer に深度なしで描く (アプリの出力とグラフの深度は混ぜられない)', () => {
+    const empty: JsonObject = {
+      version: 1,
+      resources: {},
+      passes: [{ name: 'Background', type: 'Raster', pipeline: 'pipelines/background.json', outputs: [{ res: '$backbuffer', as: 'RTV0', load: 'dontCare' }] }],
+    };
+    const g = addDrawPass(empty, 'Draw', 'pipelines/draw.json', [0, 0]);
+    expect(passesOf(g).map((p) => p.name)).toEqual(['Background', 'Draw']);
+    expect(drawNodeTarget(empty)).toEqual({ color: '$backbuffer', depth: false });
+    expect(refs(g, 'Draw', 'outputs')).toEqual([{ res: '$backbuffer', as: 'RTV0', load: 'load' }]);
+    expect(asObject(g.resources).depth).toBeUndefined();
   });
 });
 

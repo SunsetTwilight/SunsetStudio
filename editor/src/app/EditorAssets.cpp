@@ -174,13 +174,14 @@ void EditorApp::registerAssetMethods()
 	});
 
 	// テンプレートから新しいファイルを作る (同じ名前があればエラー)。パイプラインは shader に PS / CS のパス
+	// (描画ノードのパイプラインは vs に VS のパスも)
 	b.registerMethod("asset.create", [this, resolve](const Json& p, Bridge::Reply r) {
 		std::filesystem::path file;
 		std::string rel;
 		if (!resolve(p, r, file, rel))
 			return;
 		std::string text;
-		if (!assetTemplateText(p.value("template", std::string()), p.value("shader", std::string()), text))
+		if (!assetTemplateText(p.value("template", std::string()), p.value("shader", std::string()), text, p.value("vs", std::string())))
 			return r.error(BridgeError::InvalidParams, "テンプレートがありません: " + p.value("template", std::string()));
 		std::error_code ec;
 		if (std::filesystem::exists(file, ec))

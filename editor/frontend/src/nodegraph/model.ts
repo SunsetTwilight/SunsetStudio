@@ -400,6 +400,70 @@ export function addPass(graph: JsonObject, kind: PassKind, pipeline: string, at:
   return { graph: withPositions(setPasses(graph, [...passesOf(graph), pass]), positions), name };
 }
 
+// ---- 描画ノード (メッシュを描く drawList のパス) ----
+// 名前 (= レイヤー名) と、作るシェーダー / パイプラインのファイル。パスの名前とファイルが重ならないものを選ぶ
+export interface DrawNodeNames {
+  name: string;
+  vs: string;
+  ps: string;
+  pipeline: string;
+}
+export function drawNodeNames(graph: JsonObject, files: string[]): DrawNodeNames {
+  const passes = new Set(passesOf(graph).map((p) => String(p.name)));
+  const taken = new Set(files.map((f) => f.toLowerCase()));
+  for (let i = 1; ; ++i) {
+    const name = i === 1 ? 'Draw' : `Draw${i}`;
+    const base = name.toLowerCase();
+    const n = { name, vs: `shaders/${base}.vs.hlsl`, ps: `shaders/${base}.ps.hlsl`, pipeline: `pipelines/${base}.json` };
+    if (!passes.has(name) && ![n.vs, n.ps, n.pipeline].some((f) => taken.has(f))) return n;
+  }
+}
+
+// 描画ノードが描く色: sceneColor があればそれ、なければ $backbuffer。
+// $backbuffer (アプリが渡す出力) とグラフのテクスチャ (深度) は 1 つのパスの出力に混ぜられないので、そのときは深度なし
+export function drawNodeTarget(graph: JsonObject): { color: string; depth: boolean } {
+  return asObject(graph.resources).sceneColor ? { color: 'sceneColor', depth: true } : { color: '$backbuffer', depth: false };
+}
+
+// 描画ノードを加える。layer はノードの名前と同じ (インスペクターの描画レイヤーで選べる)。
+//   色: drawNodeTarget。sceneColor ならディファードのライティングのあと、読むパスの前に入れる。$backbuffer なら最後に
+//   深度: sceneColor のとき、depth があれば読み書き (load)、なければ depth のリソースを作ってクリアする
+export function addDrawPass(graph: JsonObject, name: string, pipeline: string, at: XY): JsonObject {
+  const resources = { ...asObject(graph.resources) };
+  const target = drawNodeTarget(graph);
+  const color = target.color;
+  const outputs: JsonObject[] = [{ res: color, as: 'RTV0', load: 'load' }];
+  if (target.depth) {
+    let depthLoad = 'load';
+    let depth = Object.keys(resources).find((r) => r === 'depth' && isDepthFormat(String(asObject(resources[r]).format ?? '')));
+    if (!depth) {
+      depth = uniqueName('depth', new Set(Object.keys(resources)));
+      resources[depth] = { format: 'D32_Float', size: { relative: 1 }, clear: { depth: 1 } };
+      depthLoad = 'clear';
+    }
+    outputs.push({ res: depth, as: 'DSV', load: depthLoad });
+  }
+  const pass: JsonObject = {
+    name,
+    type: 'Raster',
+    pipeline,
+    constants: [
+      { source: 'object', bind: { param: 0 } },
+      { source: 'frame', bind: { param: 1 } },
+    ],
+    outputs,
+    content: { drawList: { layer: name } },
+  };
+  const passes = passesOf(graph);
+  // 色を読むパス (Composite など) の前。色を書くパス (Lighting) より後ろにする
+  const lastWriter = passes.reduce((acc, p, i) => (asArray(p.outputs).some((r) => asObject(r).res === color) ? i : acc), -1);
+  const reader = passes.findIndex((p, i) => i > lastWriter && asArray(p.inputs).some((r) => asObject(r).res === color));
+  const index = color === '$backbuffer' || reader < 0 ? passes.length : reader;
+  const next = [...passes.slice(0, index), pass, ...passes.slice(index)];
+  const positions = { ...savedPositions(graph), [passId(name)]: at };
+  return withPositions(setPasses({ ...graph, resources }, next), positions);
+}
+
 export function addResource(graph: JsonObject, kind: 'texture' | 'buffer', at: XY): { graph: JsonObject; name: string } {
   const resources = { ...asObject(graph.resources) };
   const name = uniqueName(kind === 'texture' ? 'tex' : 'buf', new Set(Object.keys(resources)));
