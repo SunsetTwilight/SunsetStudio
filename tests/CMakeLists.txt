@@ -56,6 +56,8 @@ add_executable(studio_tests_unit
     test_lights.cpp
 )
 target_link_libraries(studio_tests_unit PRIVATE studio_bridge studio_services studio_doctest studio_options)
+target_compile_definitions(studio_tests_unit PRIVATE
+    "STUDIO_TEMPLATE_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../editor/templates\"")
 add_test(NAME unit COMMAND studio_tests_unit)
 
 # ---- UI の単体テスト (Vitest。ノードエディターのモデルなど) ----

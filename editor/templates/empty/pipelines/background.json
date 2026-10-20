@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "type": "graphics",
+  "shaders": {
+    "vs": { "file": "shaders/fullscreen.vs.hlsl" },
+    "ps": { "file": "shaders/background.ps.hlsl" }
+  },
+  "layout": {
+    "parameters": [],
+    "numParameters": 0
+  },
+  "state": {
+    "rasterizerState": { "cullMode": "None" },
+    "depthStencilState": { "depthEnable": false, "depthWriteMask": "Zero" }
+  }
+}

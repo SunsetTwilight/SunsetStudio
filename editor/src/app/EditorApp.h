@@ -169,9 +169,10 @@ private:
 	bool     m_engineDone    = false;
 	bool     m_engineOk      = false;
 	uint64_t m_framesDrawn   = 0;
-	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, Windows, Shader, WaitAfter, Finished };
+	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, Windows, Shader, WaitAfter, EmptyProject, EmptyFrames, Finished };
 	SmokeStage m_smokeStage    = SmokeStage::WaitProject;
 	bool       m_smokeProjectFailed = false;
+	uint32_t   m_smokeErrorMark     = 0;   // 空のプロジェクトを開く前の、描画のエラーの数
 	std::filesystem::path m_smokeDir;   // スモークテストのプロジェクト (一時フォルダ。終了時に消す)
 
 	// プロジェクト (UI スレッドだけが触る)

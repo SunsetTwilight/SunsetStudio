@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "resources": {},
+  "passes": [
+    { "name": "Background", "type": "Raster", "pipeline": "pipelines/background.json",
+      "outputs": [ { "res": "$backbuffer", "as": "RTV0", "load": "dontCare" } ],
+      "content": { "fullscreen": true } }
+  ]
+}

@@ -32,6 +32,7 @@ SunsetStudio/
 │   │   ├── render/ViewportRenderer.* ← ビューポートをレンダーグラフで描く
 │   │   └── viewport/ViewportWindow* ← ビューポートの子ウィンドウとマウスの入力
 │   ├── templates/deferred/     ← プロジェクトのテンプレート (graphs/ pipelines/ shaders/)
+│   ├── templates/empty/        ← 空のプロジェクトのテンプレート (背景だけのグラフ、空のシーン)
 │   └── frontend/               ← UI (React + TypeScript + Vite + dockview)
 ├── tests/                      ← 結合テスト、Bridge の単体テスト、エディターのスモークテスト (doctest)
 ├── docs/design/                ← 設計ドキュメント

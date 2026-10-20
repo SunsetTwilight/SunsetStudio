@@ -163,6 +163,7 @@ editor/
 │   ├── render/ViewportRenderer.{h,cpp} ← ビューポートをレンダーグラフで描く (M3d)
 │   ├── host/FileDialog*            ← OS のファイル / フォルダの選択ダイアログ (M4a)
 │   └── services/                   ← SchemaJson (スキーマと JSON)、Project (プロジェクトファイルと最近の一覧、M4a)
+├── templates/empty/                ← 空のプロジェクト: 背景を塗る全画面のパス 1 つと、物体のないシーン (scenes/main.scene.json。ないと既定の立方体のシーンが書かれる)。スモークテストで作って開く (終了コード 14)
 ├── templates/deferred/             ← プロジェクトのテンプレート (中身が新しいプロジェクトの直下に入る。M4a では Assets/)
 │   ├── graphs/viewport.json        ←   レンダーグラフ (GBuffer → Lighting → Grid → Composite)
 │   ├── pipelines/*.json            ←   パイプライン (シェーダー、バインディングレイアウト、ステート)

@@ -3,6 +3,7 @@
 // ============================================================
 #include <doctest/doctest.h>
 #include "services/Project.h"
+#include "services/Scene.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -140,6 +141,40 @@ TEST_CASE("プロジェクト: テンプレートから作って開く")
 	CHECK_FALSE(loadProject(p.file, opened, broken));
 	CHECK(hasPrefix(broken.errors, "JSON"));
 
+	fs::remove_all(root);
+}
+
+TEST_CASE("プロジェクト: 空のテンプレート (背景だけのグラフ、空のシーン)")
+{
+	const fs::path root = freshDir("studio_tests_project_empty");
+	const fs::path tmpl = fs::path(STUDIO_TEMPLATE_SOURCE_DIR) / "empty";
+	REQUIRE(fs::is_directory(tmpl));
+
+	Project p;
+	std::string error;
+	REQUIRE_MESSAGE(createProject(root, "Empty", tmpl, "0.3", p, error), error);
+	Project opened;
+	ProjectDiagnostics diag;
+	REQUIRE(loadProject(p.file, opened, diag, "0.3"));
+	CHECK(diag.errors.empty());
+
+	// 既定のグラフとシーンがある (シーンがないと、立方体 49 個の既定のシーンが書かれる)
+	CHECK(fs::exists(p.assetRoot() / opened.desc.viewportGraph));
+	const fs::path sceneFile = p.assetRoot() / opened.desc.viewportScene;
+	REQUIRE(fs::exists(sceneFile));
+	std::ifstream f(sceneFile, std::ios::binary);
+	const Json json = Json::parse(std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>()));
+	SceneDesc scene;
+	SceneDiagnostics sceneDiag;
+	REQUIRE(sceneFromJson(json, scene, sceneDiag));
+	CHECK(scene.objects.empty());
+	CHECK(sceneDiag.warnings.empty());
+
+	// グラフが使うパイプラインとシェーダー
+	for (const char* file : { "pipelines/background.json", "shaders/fullscreen.vs.hlsl", "shaders/background.ps.hlsl" })
+		CHECK_MESSAGE(fs::exists(p.dir() / file), file);
+
+	f.close();
 	fs::remove_all(root);
 }
 

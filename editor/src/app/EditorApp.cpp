@@ -855,6 +855,28 @@ void EditorApp::checkSmokeTest()
 		// パイプラインとグラフを作り直したあとも描けていること
 		if (m_framesDrawn < m_smokeFrameMark + 20)
 			return;
+		// 空のテンプレートからも作って開けること (背景だけのグラフ、空のシーン)
+		m_smokeStage     = SmokeStage::EmptyProject;
+		m_smokeErrorMark = m_viewportErrors.load();
+		m_host.bridge().callLocal("project.create",
+			{ { "location", pathToUtf8(m_smokeDir) }, { "name", "SmokeEmpty" }, { "template", "empty" }, { "remember", false } },
+			[this, finish](int status, const Json& r) {
+				m_host.post([this, finish, status, r] {
+					if (status != 0)
+						return finish(14, "空のテンプレートからプロジェクトを作って開けない: " + r.dump());
+					m_smokeStage     = SmokeStage::EmptyFrames;
+					m_smokeFrameMark = m_framesDrawn;
+				});
+			});
+		return;
+	case SmokeStage::EmptyFrames:
+		if (m_framesDrawn < m_smokeFrameMark + 20)
+			return;
+		if (m_viewportErrors.load() != m_smokeErrorMark)
+			return finish(14, "空のプロジェクトの描画でエラーが出た (ログの viewport を見る)");
+		if (!m_sceneError.empty() || !m_sceneData.objects.empty())
+			return finish(14, "空のプロジェクトのシーンが空でない: " + m_sceneError);
+		log("info", "smoke", "project.create: 空のテンプレートから作って開き、エラーなく描けた");
 		return finish(0, "");
 	default:
 		return;
@@ -1143,7 +1165,10 @@ void EditorApp::registerProjectMethods()
 			if (e.is_directory(ec))
 			{
 				const std::string id = pathToUtf8(e.path().filename());
-				list.push_back({ { "id", id }, { "label", id == "deferred" ? "ディファード (G-Buffer → ライティング → グリッド → 合成)" : id } });
+				const std::string label = id == "deferred" ? "ディファード (G-Buffer → ライティング → グリッド → 合成)"
+				                        : id == "empty"    ? "空 (背景だけのグラフ、空のシーン)"
+				                                           : id;
+				list.push_back({ { "id", id }, { "label", label } });
 			}
 		r.ok(list);
 	});
