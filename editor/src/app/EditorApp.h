@@ -38,6 +38,7 @@
 
 #include "host/WebHost.h"
 #include "services/BackgroundQueue.h"
+#include "services/Material.h"
 #include "services/ProjectAssets.h"
 #include "services/Project.h"
 #include "services/Scene.h"
@@ -101,6 +102,12 @@ private:
 	void requestModel(const std::string& id);         // 別のスレッドで取り込んで読み、描画スレッドに渡す
 	void onModelLoaded(uint64_t generation, const std::string& id, uint64_t ticket,
 	                   std::shared_ptr<const sunset::asset::Model> model, const sunset::asset::Diagnostics& diag, double ms);
+	void requestTexture(const std::string& id);      // マテリアルが使うテクスチャを別のスレッドで読み、描画スレッドに渡す (M5-4)
+	// スロットの取り込んだ値 (基本色、金属度、粗さ、テクスチャ) で作る標準のマテリアル
+	std::vector<MaterialDesc> slotMaterials(const std::string& modelId, const sunset::asset::Model& model) const;
+	void registerMaterialMethods();   // EditorMaterials.cpp
+	void ensureMaterialSupport(const Project& project);
+	bool writeMaterialFile(const std::string& path, const Json& material, bool create, std::string& error);   // 標準のマテリアルのファイルがなければ、テンプレートから足す
 	Json sceneInfoJson() const;
 	void emitSceneChanged();
 	void pushSceneToRenderer();
@@ -214,8 +221,15 @@ private:
 		std::string error;
 		Json        info;     // ノード / メッシュ / 頂点 / 三角形 / スロットの数
 		uint64_t    ticket = 0;
+		std::vector<MaterialDesc> slotMaterials;   // スロットごとの取り込んだ値のマテリアル (M5-4)
 	};
 	std::map<std::string, ModelState> m_modelStates;
+	struct TextureState
+	{
+		std::string status;   // "loading" / "ready" / "error"
+		uint64_t    ticket = 0;
+	};
+	std::map<std::string, TextureState> m_textureStates;
 	struct { int x = 0, y = 0, w = 0, h = 0; bool visible = false; } m_viewportWebRect;   // Web のパネルの矩形 (戻すときに使う)
 	int      m_exitCode      = 0;
 	BackgroundQueue m_libraryWorker;   // 最後に置く (先に止まる)。run の終わりでも止める

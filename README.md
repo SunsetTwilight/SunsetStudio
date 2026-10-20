@@ -97,7 +97,7 @@ cmake --build --preset windows-debug
 
 | 変数 | 既定値 | 内容 |
 |------|--------|------|
-| `STUDIO_GFX_TAG` | `v0.4.1` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
+| `STUDIO_GFX_TAG` | `v0.4.2` | SunsetGraphicsEngine のタグ / ブランチ / コミット |
 | `STUDIO_MATHLIB_TAG` | `v0.1.0` | SunsetMathLib のタグ / ブランチ / コミット |
 | `STUDIO_ASSET_TAG` | (コミット) | SunsetAsset のタグ / ブランチ / コミット |
 | `STUDIO_GITHUB_OWNER` | `SunsetTwilight` | GitHub のオーナー |
@@ -160,6 +160,8 @@ npm run dev
 set STUDIO_UI_DEV_URL=http://localhost:5173
 build\windows-dev-debug\bin\SunsetEditor.exe
 ```
+
+マテリアル (M5-4): インスペクターで物体を選ぶと、スロットごとのマテリアルが出ます。割り当てていないスロットは、取り込んだ値 (モデルの基本色とテクスチャ) の標準のマテリアルで描きます。「マテリアルにする」で `materials/*.material.json` に書き出して割り当て、マテリアルのタブで編集します (欄はシェーダーの `cbuffer Material` とテクスチャの変数から自動で作ります)。
 
 タイトルバーはメニューバーを兼ねます (VS Code のような形。ファイル / 編集 / 表示 / ウィンドウ / ヘルプ)。何もない所をドラッグするとウィンドウが動き、ダブルクリックで最大化します。Alt でメニューをキーボードで操作でき、Alt + 文字 (Alt+F など) で開きます。
 

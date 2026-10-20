@@ -8,11 +8,13 @@
 //    Assets/shaders/*.hlsl         シェーダー
 //  プロジェクトを開くたびに init し直す (M4a)。
 //  このクラスは、シーン (シーンのファイルの物体と地面のグリッド) とフレームの定数を IDrawListProvider としてグラフに渡し、
+//  M5-4: drawList の layer をマテリアルパスとして、そのパスを持つマテリアルの物体をマテリアルのパイプラインで描く。
 //  アセットの変更 (ファイルの保存、インスペクターの編集) をその場で反映する。
 //
 //  描画スレッドだけが使う。
 // ============================================================
 
+#include "MaterialSystem.h"
 #include "ModelCache.h"
 #include "OrbitCamera.h"
 #include "ResourceViewer.h"
@@ -24,6 +26,7 @@
 #include "gfx/rendergraph/Executor.h"
 #include "gfx/rendergraph/GraphAsset.h"
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -61,11 +64,16 @@ public:
 	                 const ResourceViewer::Settings& settings, ResourceViewer::ViewCache& cache, const OrbitCamera& camera,
 	                 std::string& status);
 
-	// シーンの物体を置き換える (M5-2。drawList の layer が同じ、見えている物体を描く。
-	// asset:<ID> のモデルは setModel で届いてから描く。届くまでは何も描かない)
+	// シーンの物体を置き換える (M5-2)。asset:<ID> のモデルは setModel で届いてから描く。届くまでは何も描かない
 	void setScene(GraphicsEngine& engine, const SceneDesc& scene);
-	// 取り込んだモデルを入れる / 入れ替える (M5-3)。model が nullptr なら外す
-	void setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model);
+	// 取り込んだモデルを入れる / 入れ替える (M5-3)。model が nullptr なら外す。
+	// slotMaterials はスロットごとの取り込んだ値のマテリアル (割り当てていないスロットで使う。M5-4)
+	void setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model,
+	              const std::vector<MaterialDesc>* slotMaterials = nullptr);
+	MaterialSystem& materials() { return m_materials; }
+	// 取り込んだ値のマテリアルのキー
+	static std::string  autoMaterialKey(const std::string& modelId, size_t slot);
+	static MaterialDesc standardMaterial(const std::array<float, 4>& baseColor, float metallic, float roughness);
 	// 選んでいる物体 (空なら選んでいない)。render で辺の印を描く
 	void setSelection(const std::string& id) { m_selection = id; }
 	// ビューポートのピクセル (x, y) の下の物体の id (なければ空)
@@ -92,18 +100,25 @@ public:
 	BufferHandle constants(const std::string& source, const gfx::rg::DrawContext& ctx) override;
 
 private:
+	// 1 回の描画 (立方体、またはモデルの (ノード, サブメッシュ))
+	struct DrawItem
+	{
+		BufferHandle vb, ib;
+		GfxFormat    indexFormat = GfxFormat::R32_Uint;
+		uint32_t     indexCount  = 0;
+		uint32_t     indexOffset = 0;
+		BufferHandle cb;          // ワールド行列と色 (common.hlsli の Object)
+		std::string  material;    // マテリアルのキー (ファイルのパス / "auto:…")
+	};
 	struct Object
 	{
-		BufferHandle cb;   // ワールド行列と色 (common.hlsli の Object)。builtin:cube
-		std::vector<BufferHandle> drawCBs;   // asset:<ID> のモデル: ModelCache::Draw ごと
-		std::string  id;
-		std::string  layer;
-		std::string  modelId;          // asset:<ID> の ID (空なら builtin:cube)
-		bool         visible = true;
-		bool         cube    = true;   // builtin:cube
-		Mat4         world;
-		Mat4         box;              // 選択の判定と印の箱 (単位の箱をワールドへ)
+		std::string           id;
+		bool                  visible = true;
+		Mat4                  world;
+		Mat4                  box;   // 選択の判定と印の箱 (単位の箱をワールドへ)
+		std::vector<DrawItem> draws;
 	};
+	static void releaseDraws(GraphicsEngine& engine, Object& o, size_t keep);
 	void updateObjects(GraphicsEngine& engine);   // m_sceneDesc と m_models から m_objects を作り直す
 
 	std::filesystem::path                     m_root;
@@ -123,6 +138,8 @@ private:
 	BufferHandle        m_vb, m_ib, m_frameCB;
 	std::vector<Object> m_objects;
 	ModelCache          m_models;
+	MaterialSystem      m_materials;
+	GraphicsEngine*     m_engine = nullptr;   // draw の中で使う (init から shutdown まで)
 	size_t              m_reportedPipelineErrors = 0;
 	size_t              m_reportedExecutorErrors = 0;
 };

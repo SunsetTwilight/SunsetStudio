@@ -12,6 +12,8 @@ namespace studio
 {
 namespace
 {
+const char* k_CubeMaterial = "auto:cube";
+
 // assets/shaders/common.hlsli の Frame と合わせる
 struct FrameConstants
 {
@@ -29,14 +31,8 @@ struct ObjectConstants
 	float color[4];
 };
 
-struct Vertex
-{
-	float pos[3];
-	float normal[3];
-};
-
-// 面ごとに法線の違う 24 頂点の立方体 (-0.5〜0.5)
-void makeCube(std::vector<Vertex>& vertices, std::vector<uint16_t>& indices)
+// 面ごとに法線の違う 24 頂点の立方体 (-0.5〜0.5)。UV は面ごとに 0〜1、接線は u の向き
+void makeCube(std::vector<MeshVertex>& vertices, std::vector<uint16_t>& indices)
 {
 	const float n[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
 	for (int f = 0; f < 6; ++f)
@@ -50,7 +46,9 @@ void makeCube(std::vector<Vertex>& vertices, std::vector<uint16_t>& indices)
 		for (const auto& c : corners)
 		{
 			const Float3 p = nn * 0.5f + u * (c[0] * 0.5f) + v * (c[1] * 0.5f);
-			vertices.push_back({ { p.x, p.y, p.z }, { nn.x, nn.y, nn.z } });
+			// UV は左上が原点 (v は下向き)。接線 = UV の u の向き、従法線 (n × t) = UV の v が減る向き
+			vertices.push_back({ { p.x, p.y, p.z }, { nn.x, nn.y, nn.z }, { u.x, u.y, u.z, -1 },
+			                     { (c[0] + 1) * 0.5f, 1 - (c[1] + 1) * 0.5f } });
 		}
 		// 反時計回りが表 (pipelines/gbuffer.json の frontCounterClockwise = true)
 		static const uint16_t order[] = { 0, 1, 2, 0, 2, 3 };
@@ -89,10 +87,10 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 	}
 
 	// ---- メッシュと定数バッファ ----
-	std::vector<Vertex>   vertices;
-	std::vector<uint16_t> indices;
+	std::vector<MeshVertex> vertices;
+	std::vector<uint16_t>   indices;
 	makeCube(vertices, indices);
-	m_vb = engine.createBuffer({ vertices.size() * sizeof(Vertex), BufferUsage::Vertex, vertices.data(), sizeof(Vertex) });
+	m_vb = engine.createBuffer({ vertices.size() * sizeof(MeshVertex), BufferUsage::Vertex, vertices.data(), sizeof(MeshVertex) });
 	m_ib = engine.createBuffer({ indices.size() * sizeof(uint16_t), BufferUsage::Index, indices.data(), sizeof(uint16_t) });
 	m_frameCB = engine.createBuffer({ sizeof(FrameConstants), BufferUsage::Uniform });
 	if (!m_vb.valid() || !m_ib.valid() || !m_frameCB.valid())
@@ -108,6 +106,10 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 		if (!m_outlineOk)
 			m_viewerError += (m_viewerError.empty() ? "" : "\n") + outlineError;
 	}
+	// ---- マテリアル (M5-4)。立方体は白の標準のマテリアル (物体の色を掛ける) ----
+	m_engine = &engine;
+	m_materials.init(engine, shaders, *m_pipelines, assetRoot);
+	m_materials.setAuto(k_CubeMaterial, standardMaterial({ 1, 1, 1, 1 }, 0.0f, 0.6f));
 	// 物体はシーンのファイルから (setScene)
 	return true;
 }
@@ -126,13 +128,11 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 	m_sceneDesc = {};
 	m_selection.clear();
 	for (auto& o : m_objects)
-	{
-		engine.destroyBuffer(o.cb);
-		for (BufferHandle& b : o.drawCBs)
-			engine.destroyBuffer(b);
-	}
+		releaseDraws(engine, o, 0);
 	m_objects.clear();
 	m_models.clear(engine);
+	m_materials.shutdown(engine);
+	m_engine = nullptr;
 	engine.destroyBuffer(m_vb);
 	engine.destroyBuffer(m_ib);
 	engine.destroyBuffer(m_frameCB);
@@ -153,6 +153,10 @@ ViewportRenderer::PollResult ViewportRenderer::pollAssets()
 		r.graphRecompiled = m_graph->recompile(m_options);
 		r.graphFailed     = m_graph->lastFailed();
 	}
+	// マテリアルのファイルの変更と、パイプラインが変わったときのリフレクションの調べ直し
+	m_materials.poll();
+	if (!pr.reloaded.empty())
+		m_materials.invalidateShaders();
 	if (r.graphReloaded || r.graphRecompiled || r.graphFailed)
 		r.graphMessages = m_graph->messages();
 	m_graph->clearStatus();
@@ -169,6 +173,8 @@ std::vector<std::string> ViewportRenderer::takeNewErrors()
 	}
 	if (!m_pipelines || !m_executor)
 		return out;
+	for (auto& e : m_materials.takeErrors())
+		out.push_back(std::move(e));
 	const auto& pe = m_pipelines->errors();
 	for (; m_reportedPipelineErrors < pe.size(); ++m_reportedPipelineErrors)
 		out.push_back(pe[m_reportedPipelineErrors]);
@@ -240,17 +246,51 @@ void ViewportRenderer::setScene(GraphicsEngine& engine, const SceneDesc& scene)
 	updateObjects(engine);
 }
 
-void ViewportRenderer::setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model)
+void ViewportRenderer::setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model,
+                                const std::vector<MaterialDesc>* slotMaterials)
 {
 	if (model)
 	{
 		std::string error;
 		if (!m_models.set(engine, id, *model, error))
 			m_viewerError += (m_viewerError.empty() ? "" : "\n") + error;
+		// スロットごとの取り込んだ値のマテリアル (割り当てていないスロットで使う)
+		for (size_t i = 0; i < model->slots.size(); ++i)
+		{
+			const MaterialDesc desc = slotMaterials && i < slotMaterials->size()
+				? (*slotMaterials)[i] : standardMaterial({ 1, 1, 1, 1 }, 0.0f, 0.6f);
+			m_materials.setAuto(autoMaterialKey(id, i), desc);
+		}
 	}
 	else
 		m_models.remove(engine, id);
 	updateObjects(engine);
+}
+
+std::string ViewportRenderer::autoMaterialKey(const std::string& modelId, size_t slot)
+{
+	return "auto:" + modelId + ":" + std::to_string(slot);
+}
+
+MaterialDesc ViewportRenderer::standardMaterial(const std::array<float, 4>& baseColor, float metallic, float roughness)
+{
+	// ファイルに書いたときに 0.949999988 のようにならないよう、6 桁に丸めて double で持つ
+	auto r = [](float v) { return std::round(static_cast<double>(v) * 1e6) / 1e6; };
+	MaterialDesc m;
+	m.passes[k_StandardMaterialPass] = k_StandardMaterialPipeline;
+	m.params = { { "baseColor", { r(baseColor[0]), r(baseColor[1]), r(baseColor[2]), r(baseColor[3]) } },
+	             { "metallic", r(metallic) }, { "roughness", r(roughness) }, { "alphaCutoff", 0.0 } };
+	return m;
+}
+
+void ViewportRenderer::releaseDraws(GraphicsEngine& engine, Object& o, size_t keep)
+{
+	while (o.draws.size() > keep)
+	{
+		if (o.draws.back().cb.valid())
+			engine.destroyBuffer(o.draws.back().cb);
+		o.draws.pop_back();
+	}
 }
 
 void ViewportRenderer::updateObjects(GraphicsEngine& engine)
@@ -259,18 +299,9 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 	const std::vector<Matrix> world   = worldMatrices(scene);
 	const std::vector<bool>   visible = effectiveVisibility(scene);
 	// 定数バッファは使い回し、足りなければ作り、余れば消す (エンジンが GPU の使い終わりまで解放を遅らせる)
-	auto releaseDraws = [&](Object& o, size_t keep) {
-		while (o.drawCBs.size() > keep)
-		{
-			if (o.drawCBs.back().valid())
-				engine.destroyBuffer(o.drawCBs.back());
-			o.drawCBs.pop_back();
-		}
-	};
 	while (m_objects.size() > scene.objects.size())
 	{
-		engine.destroyBuffer(m_objects.back().cb);
-		releaseDraws(m_objects.back(), 0);
+		releaseDraws(engine, m_objects.back(), 0);
 		m_objects.pop_back();
 	}
 	m_objects.resize(scene.objects.size());
@@ -279,45 +310,63 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 		const SceneObject& so = scene.objects[i];
 		Object& o = m_objects[i];
 		o.id      = so.id;
-		o.layer   = so.layer;
 		o.visible = visible[i];
-		o.cube    = so.model == "builtin:cube";
-		o.modelId = assetIdOfModel(so.model).value_or(std::string());
 		std::copy(world[i].begin(), world[i].end(), o.world.m);
 		o.box = o.world;
 
-		const ModelCache::Gpu* gpu = o.modelId.empty() ? nullptr : m_models.find(o.modelId);
-		if (o.cube)
+		// 描くもの: 立方体は 1 つ (スロット "Default")、モデルは (ノード, サブメッシュ) ごと
+		struct Want
 		{
-			releaseDraws(o, 0);
-			if (!o.cb.valid())
-				o.cb = engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform });
-			ObjectConstants c;
-			c.world = o.world;
-			std::copy(so.color.begin(), so.color.end(), c.color);
-			if (o.cb.valid())
-				engine.updateBuffer(o.cb, &c, sizeof(c));
-			continue;
+			BufferHandle vb, ib;
+			GfxFormat    format = GfxFormat::R32_Uint;
+			uint32_t     count = 0, offset = 0;
+			Mat4         world;
+			std::string  material;
+		};
+		std::vector<Want> wants;
+		auto assigned = [&](const std::string& slot) -> std::string {
+			const auto it = so.materials.find(slot);
+			return it != so.materials.end() ? it->second : std::string();
+		};
+		if (so.model == "builtin:cube")
+		{
+			const std::string m = assigned("Default");
+			wants.push_back({ m_vb, m_ib, GfxFormat::R16_Uint, 36, 0, o.world, m.empty() ? std::string(k_CubeMaterial) : m });
 		}
-		// 取り込んだモデル: (ノード, サブメッシュ) ごとに、ワールド × ノードの行列と、物体の色 × スロットの色
-		if (o.cb.valid())
-			engine.destroyBuffer(o.cb);
-		o.cb = {};
-		const size_t draws = gpu ? gpu->draws.size() : 0;
-		releaseDraws(o, draws);
-		if (gpu)
-			o.box = o.world * gpu->box;
-		for (size_t d = 0; d < draws; ++d)
+		else if (const auto modelId = assetIdOfModel(so.model))
 		{
-			if (o.drawCBs.size() <= d)
-				o.drawCBs.push_back(engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform }));
-			const ModelCache::Draw& dr = gpu->draws[d];
+			if (const ModelCache::Gpu* gpu = m_models.find(*modelId))
+			{
+				o.box = o.world * gpu->box;
+				for (const ModelCache::Draw& d : gpu->draws)
+				{
+					const std::string slot = d.slot < gpu->slotNames.size() ? gpu->slotNames[d.slot] : std::string();
+					const std::string m    = assigned(slot);
+					const ModelCache::Mesh& mesh = gpu->meshes[d.mesh];
+					wants.push_back({ mesh.vb, mesh.ib, GfxFormat::R32_Uint, d.indexCount, d.indexOffset, o.world * d.node,
+					                  m.empty() ? autoMaterialKey(*modelId, d.slot) : m });
+				}
+			}
+		}
+		releaseDraws(engine, o, wants.size());
+		o.draws.resize(wants.size());
+		for (size_t k = 0; k < wants.size(); ++k)
+		{
+			DrawItem&   d = o.draws[k];
+			const Want& w = wants[k];
+			d.vb          = w.vb;
+			d.ib          = w.ib;
+			d.indexFormat = w.format;
+			d.indexCount  = w.count;
+			d.indexOffset = w.offset;
+			d.material    = w.material;
+			if (!d.cb.valid())
+				d.cb = engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform });
 			ObjectConstants c;
-			c.world = o.world * dr.node;
-			for (int k = 0; k < 4; ++k)
-				c.color[k] = so.color[static_cast<size_t>(k)] * dr.color[k];
-			if (o.drawCBs[d].valid())
-				engine.updateBuffer(o.drawCBs[d], &c, sizeof(c));
+			c.world = w.world;
+			std::copy(so.color.begin(), so.color.end(), c.color);
+			if (d.cb.valid())
+				engine.updateBuffer(d.cb, &c, sizeof(c));
 		}
 	}
 }
@@ -385,49 +434,65 @@ void ViewportRenderer::drawPreview(GraphicsEngine& engine, IRenderTarget* rt, ui
 
 void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::DrawContext& ctx)
 {
-	if (query.layer != "Grid")   // シーンの物体: layer が同じものを描く (M5-4 からはマテリアルパス)
+	if (query.layer == "Grid")
 	{
-		const int32_t objectParam = ctx.paramOf("object");
-		const GfxVertexBufferBinding vb{ m_vb, 0, 0, sizeof(Vertex) };
-		ctx.cb->setVertexBuffers(0, 1, &vb);
-		GfxIndexBufferBinding ib;
-		ib.buffer = m_ib;
-		ib.format = GfxFormat::R16_Uint;
-		ctx.cb->setIndexBuffer(ib);
-		for (const Object& o : m_objects)
-		{
-			if (!o.visible || !o.cube || o.layer != query.layer)
-				continue;
-			if (objectParam >= 0)
-				ctx.cb->setRootDescriptor(static_cast<uint32_t>(objectParam), o.cb, 0);
-			ctx.cb->drawIndexedInstanced(36);
-		}
-		// 取り込んだモデル (M5-3)
-		for (const Object& o : m_objects)
-		{
-			if (!o.visible || o.modelId.empty() || o.layer != query.layer)
-				continue;
-			const ModelCache::Gpu* gpu = m_models.find(o.modelId);
-			if (!gpu)
-				continue;
-			for (size_t d = 0; d < gpu->draws.size() && d < o.drawCBs.size(); ++d)
-			{
-				const ModelCache::Draw& dr   = gpu->draws[d];
-				const ModelCache::Mesh& mesh = gpu->meshes[dr.mesh];
-				const GfxVertexBufferBinding mvb{ mesh.vb, 0, 0, 6 * sizeof(float) };
-				ctx.cb->setVertexBuffers(0, 1, &mvb);
-				GfxIndexBufferBinding mib;
-				mib.buffer = mesh.ib;
-				mib.format = GfxFormat::R32_Uint;
-				ctx.cb->setIndexBuffer(mib);
-				if (objectParam >= 0)
-					ctx.cb->setRootDescriptor(static_cast<uint32_t>(objectParam), o.drawCBs[d], 0);
-				ctx.cb->drawIndexedInstanced(dr.indexCount, 1, dr.indexOffset, 0, 0);
-			}
-		}
-	}
-	else if (query.layer == "Grid")
 		ctx.cb->drawInstanced(6);   // y = 0 の大きな四角形 (assets/shaders/grid.vs.hlsl)
+		return;
+	}
+	if (!m_engine)
+		return;
+	// layer = マテリアルパス (M5-4)。そのパスを持つマテリアルの物体を、マテリアルのパイプラインで描く (マテリアルの順に並べる)
+	const std::string& pass = query.layer;
+	std::vector<const DrawItem*> items;
+	for (const Object& o : m_objects)
+		if (o.visible)
+			for (const DrawItem& d : o.draws)
+				if (m_materials.hasPass(d.material, pass))
+					items.push_back(&d);
+	std::stable_sort(items.begin(), items.end(), [](const DrawItem* a, const DrawItem* b) { return a->material < b->material; });
+
+	const std::string*    current = nullptr;
+	MaterialSystem::Bound bound;
+	bool                  ok = false;
+	uint64_t              lastVb = 0, lastIb = 0;
+	for (const DrawItem* d : items)
+	{
+		if (!current || *current != d->material)
+		{
+			current = &d->material;
+			ok = m_materials.prepare(*m_engine, d->material, pass, ctx.targets, bound);
+			if (!ok)
+				continue;
+			// パイプラインを替えるとルートシグネチャも替わるので、バインドはすべて設定し直す
+			ctx.cb->bindPipeline(bound.pipeline);
+			if (bound.numParams > k_MaterialParamFrame)
+				ctx.cb->setRootDescriptor(k_MaterialParamFrame, m_frameCB, 0);
+			if (bound.constants.valid() && bound.numParams > k_MaterialParamMaterial)
+				ctx.cb->setRootDescriptor(k_MaterialParamMaterial, bound.constants, 0);
+			if (!bound.textures.empty() && bound.numParams > k_MaterialParamTextures)
+				ctx.cb->setDescriptorTable(k_MaterialParamTextures, bound.textures.data(), static_cast<uint32_t>(bound.textures.size()));
+			lastVb = lastIb = 0;
+		}
+		if (!ok)
+			continue;
+		if (d->vb.id != lastVb)
+		{
+			const GfxVertexBufferBinding vb{ d->vb, 0, 0, sizeof(MeshVertex) };
+			ctx.cb->setVertexBuffers(0, 1, &vb);
+			lastVb = d->vb.id;
+		}
+		if (d->ib.id != lastIb)
+		{
+			GfxIndexBufferBinding ib;
+			ib.buffer = d->ib;
+			ib.format = d->indexFormat;
+			ctx.cb->setIndexBuffer(ib);
+			lastIb = d->ib.id;
+		}
+		if (bound.numParams > k_MaterialParamObject)
+			ctx.cb->setRootDescriptor(k_MaterialParamObject, d->cb, 0);
+		ctx.cb->drawIndexedInstanced(d->indexCount, 1, d->indexOffset, 0, 0);
+	}
 }
 
 BufferHandle ViewportRenderer::constants(const std::string& source, const gfx::rg::DrawContext&)

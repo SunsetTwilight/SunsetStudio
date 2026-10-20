@@ -162,14 +162,14 @@ export interface ProjectInfo {
 export interface SceneObjectJson {
   id: string;
   name: string;
-  model: string; // "builtin:cube"
+  model: string; // "builtin:cube" / "asset:<ID>"
   parent: string | null;
   position: [number, number, number];
   rotation: [number, number, number]; // 度 (X → Y → Z の順に回す)
   scale: [number, number, number];
   visible: boolean;
-  color: [number, number, number, number]; // 仮 (M5-4 でマテリアルに)
-  layer: string; // 仮 (レンダーグラフの drawList の layer)
+  color: [number, number, number, number]; // マテリアルの色に掛ける色
+  materials?: Record<string, string>; // スロット → マテリアルのファイル (書いていないスロットは取り込んだ値。M5-4)
 }
 export interface SceneJson {
   version: number;
@@ -196,6 +196,44 @@ export interface LibraryModelInfo {
   boundsMin: [number, number, number];
   boundsMax: [number, number, number];
   loadMs: number;
+  slotNames: string[]; // マテリアルのスロットの名前 (シーンの materials のキー)
+}
+
+// マテリアル (M5-4): materials/*.material.json
+export interface MaterialJson {
+  version: number;
+  passes: Record<string, string>; // マテリアルパス (drawList の layer) → パイプライン
+  params: Record<string, JsonValue>; // cbuffer Material の変数 → 値
+  textures: Record<string, string>; // テクスチャの変数 → "asset:<ID>"
+}
+export interface MaterialVar {
+  name: string;
+  type: 'float' | 'int' | 'uint' | 'bool';
+  rows: number;
+  columns: number;
+  elements: number;
+  offset: number;
+}
+export interface MaterialTextureVar {
+  name: string;
+  slot: number;
+  srgb: boolean;
+  default: 'white' | 'flatNormal';
+}
+export interface MaterialPassInfo {
+  pipeline: string;
+  ok: boolean;
+  error?: string;
+  cbuffer: MaterialVar[];
+  textures: MaterialTextureVar[];
+}
+export interface MaterialInfo {
+  key: string;
+  ok: boolean;
+  auto: boolean; // 取り込んだ値のマテリアル (ファイルではない)
+  error?: string;
+  material?: MaterialJson;
+  passes?: Record<string, MaterialPassInfo>;
 }
 export interface LibraryModelState {
   status: 'loading' | 'ready' | 'error';
@@ -346,6 +384,10 @@ export interface Methods {
   'library.refresh': { params: Record<string, never>; result: { created: number; reIded: number; reloaded: string[] } };
   'library.reimport': { params: { id: string }; result: { id: string } };
   'library.load': { params: { id: string }; result: { id: string; status: string } };
+  'material.list': { params: Record<string, never>; result: { files: string[] } };
+  'material.describe': { params: { key: string }; result: MaterialInfo };
+  'material.set': { params: { path: string; material: MaterialJson; label?: string }; result: { path: string } };
+  'material.create': { params: { path: string; material?: MaterialJson }; result: { path: string } };
   'window.minimize': { params: Record<string, never>; result: { maximized: boolean } };
   'window.toggleMaximize': { params: Record<string, never>; result: { maximized: boolean } };
   'window.close': { params: Record<string, never>; result: Record<string, never> };
@@ -404,4 +446,5 @@ export interface Events {
   'scene.picked': { id: string };
   'library.changed': Record<string, never>;
   'window.state': { maximized: boolean };
+  'material.changed': { path: string };
 }

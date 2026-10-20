@@ -26,7 +26,7 @@ include(FetchContent)
 # ※ ブランチを指定した場合、URL が変わらないので 2 回目以降は再ダウンロードされない。
 #    最新を取り込むには build/<preset>/_deps を削除するか --fresh で構成し直す。
 set(STUDIO_GITHUB_OWNER "SunsetTwilight" CACHE STRING "自作ライブラリの GitHub のオーナー")
-set(STUDIO_GFX_TAG      "v0.4.1"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
+set(STUDIO_GFX_TAG      "v0.4.2"         CACHE STRING "SunsetGraphicsEngine のタグ / ブランチ / コミット")
 set(STUDIO_MATHLIB_TAG  "v0.1.0"         CACHE STRING "SunsetMathLib のタグ / ブランチ / コミット")
 # SunsetAsset はまだタグがないので、コミットで固定する (v0.1.0 のタグを作ったら差し替える)
 set(STUDIO_ASSET_TAG    "26096953d8868b1c57a3d16845a5582dcf1f46da" CACHE STRING "SunsetAsset のタグ / ブランチ / コミット")

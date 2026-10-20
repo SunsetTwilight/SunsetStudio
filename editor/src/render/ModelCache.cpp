@@ -7,15 +7,6 @@
 
 namespace studio
 {
-namespace
-{
-// ViewportRenderer.cpp の Vertex と同じ形 (pipelines/gbuffer.json の入力)
-struct Vertex
-{
-	float pos[3];
-	float normal[3];
-};
-} // namespace
 
 bool ModelCache::set(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model& model, std::string& error)
 {
@@ -26,18 +17,29 @@ bool ModelCache::set(GraphicsEngine& engine, const std::string& id, const sunset
 		Mesh mesh;
 		if (m.vertexCount > 0 && !m.indices.empty())
 		{
-			std::vector<Vertex> vertices(m.vertexCount);
-			const bool hasNormals = m.normals.size() >= size_t(m.vertexCount) * 3;
+			std::vector<MeshVertex> vertices(m.vertexCount);
+			const size_t n = m.vertexCount;
+			const bool hasNormals  = m.normals.size() >= n * 3;
+			const bool hasTangents = m.tangents.size() >= n * 4;
+			const bool hasUv       = m.uv0.size() >= n * 2;
 			for (uint32_t v = 0; v < m.vertexCount; ++v)
 			{
-				Vertex& out = vertices[v];
+				MeshVertex& out = vertices[v];
 				std::copy_n(&m.positions[size_t(v) * 3], 3, out.pos);
 				if (hasNormals)
 					std::copy_n(&m.normals[size_t(v) * 3], 3, out.normal);
 				else
 					out.normal[0] = 0, out.normal[1] = 1, out.normal[2] = 0;
+				if (hasTangents)
+					std::copy_n(&m.tangents[size_t(v) * 4], 4, out.tangent);
+				else
+					out.tangent[0] = 1, out.tangent[1] = 0, out.tangent[2] = 0, out.tangent[3] = 1;
+				if (hasUv)
+					std::copy_n(&m.uv0[size_t(v) * 2], 2, out.uv);
+				else
+					out.uv[0] = out.uv[1] = 0;
 			}
-			mesh.vb = engine.createBuffer({ vertices.size() * sizeof(Vertex), BufferUsage::Vertex, vertices.data(), sizeof(Vertex) });
+			mesh.vb = engine.createBuffer({ vertices.size() * sizeof(MeshVertex), BufferUsage::Vertex, vertices.data(), sizeof(MeshVertex) });
 			mesh.ib = engine.createBuffer({ m.indices.size() * sizeof(uint32_t), BufferUsage::Index, m.indices.data(), sizeof(uint32_t) });
 			if (!mesh.vb.valid() || !mesh.ib.valid())
 			{
@@ -66,9 +68,8 @@ bool ModelCache::set(GraphicsEngine& engine, const std::string& id, const sunset
 			d.mesh        = static_cast<uint32_t>(mi);
 			d.indexOffset = sm.indexOffset;
 			d.indexCount  = sm.indexCount;
+			d.slot        = sm.slot;
 			std::copy(world[n].begin(), world[n].end(), d.node.m);
-			if (sm.slot < model.slots.size())
-				std::copy_n(model.slots[sm.slot].baseColor.begin(), 4, d.color);
 			gpu.draws.push_back(d);
 		}
 	}
@@ -79,6 +80,8 @@ bool ModelCache::set(GraphicsEngine& engine, const std::string& id, const sunset
 	const Float3 center{ (lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f };
 	const Float3 size{ std::max(hi.x - lo.x, 1e-3f), std::max(hi.y - lo.y, 1e-3f), std::max(hi.z - lo.z, 1e-3f) };
 	gpu.box = Mat4::translateScale(center, size);
+	for (const auto& s : model.slots)
+		gpu.slotNames.push_back(s.name);
 
 	m_models.emplace(id, std::move(gpu));
 	return true;

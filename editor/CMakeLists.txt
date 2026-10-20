@@ -37,6 +37,8 @@ add_library(studio_services STATIC
     src/services/Scene.cpp
     src/services/ProjectAssets.h      # アセットのライブラリ (assets/ と Cache/assets/。SunsetAsset、M5-3)
     src/services/ProjectAssets.cpp
+    src/services/Material.h           # マテリアルのファイルと、パラメーターの詰め方 (M5-4)
+    src/services/Material.cpp
 )
 target_include_directories(studio_services PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(studio_services
@@ -54,6 +56,7 @@ add_executable(SunsetEditor
     src/app/EditorAssets.cpp
     src/app/EditorScene.cpp
     src/app/EditorLibrary.cpp
+    src/app/EditorMaterials.cpp
     src/host/WebHost.h
     src/host/WebHost.cpp
     src/host/FileDialog.h
@@ -71,6 +74,8 @@ add_executable(SunsetEditor
     src/render/SelectionOutline.cpp
     src/render/ModelCache.h
     src/render/ModelCache.cpp
+    src/render/MaterialSystem.h
+    src/render/MaterialSystem.cpp
     src/viewport/ViewportWindow.h
     src/viewport/ViewportWindow_win32.cpp
     src/viewport/FloatingWindow.h

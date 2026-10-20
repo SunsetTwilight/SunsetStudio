@@ -230,4 +230,30 @@ std::shared_ptr<const sa::Model> ProjectAssets::loadModel(const sa::AssetRecord&
 		return diag.error(record.path + ": キャッシュを読めません: " + error), nullptr;
 	return model;
 }
+std::shared_ptr<const sa::Texture> ProjectAssets::loadTexture(const sa::AssetRecord& record, const fs::path& cacheDir, sa::Diagnostics& diag) const
+{
+	if (record.meta.importer != "texture")
+		return diag.error(record.path + ": テクスチャではありません (" + record.meta.importer + ")"), nullptr;
+	const sa::AssetDatabase db(m_registry);
+	fs::path artifact;
+	if (!db.import(record, cacheDir, artifact, diag))
+		return nullptr;
+	auto texture = std::make_shared<sa::Texture>();
+	std::string error;
+	if (!sa::loadTexture(artifact, *texture, &error))
+		return diag.error(record.path + ": キャッシュを読めません: " + error), nullptr;
+	return texture;
+}
+
+const sa::AssetRecord* ProjectAssets::findReferenced(const sa::AssetRecord& model, const std::string& relative) const
+{
+	if (relative.empty())
+		return nullptr;
+	// コピーで取り込んだモデルも外部の参照も、元のファイルの隣から探す (取り込んだテクスチャの source と比べる)
+	const fs::path want = (model.source.parent_path() / sa::pathFromUtf8(relative)).lexically_normal();
+	for (const sa::AssetRecord& r : m_db->records())
+		if (!r.missing && r.source.lexically_normal() == want)
+			return &r;
+	return nullptr;
+}
 } // namespace studio

@@ -1374,3 +1374,38 @@ button.link:disabled {
   color: var(--muted);
   white-space: nowrap;
 }
+
+/* ---- マテリアル (M5-4) ---- */
+.material-panel {
+  display: flex;
+  flex-direction: column;
+}
+.material-editor {
+  flex: 1;
+  overflow: auto;
+}
+.material-pass + .material-pass {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.material-values,
+.material-color,
+.object-material {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.material-values input.number,
+.material-color input.number {
+  width: 58px;
+}
+.object-material select {
+  flex: 1;
+  min-width: 0;
+}
+.material-unused,
+.object-slots-note {
+  font-size: 12px;
+  padding: 4px 8px;
+}

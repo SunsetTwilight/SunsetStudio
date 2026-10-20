@@ -8,19 +8,23 @@
 //    { "version": 1,
 //      "objects": [ { "id": "cube-1", "name": "Center", "model": "builtin:cube", "parent": null,
 //                     "position": [0, 1.5, 0], "rotation": [0, 0, 0], "scale": [3, 3, 3],
-//                     "visible": true, "color": [0.92, 0.55, 0.30, 1], "layer": "Opaque" } ],
+//                     "visible": true, "color": [0.92, 0.55, 0.30, 1],
+//                     "materials": { "Body": "materials/skin.material.json" } } ],
 //      "editor": { … } }   // エディターの情報 (読み書きで保つだけ)
 //
 //  ・id はシーンの中で一意 (英数字と - _ .)。parent は親の id (null = 一番上)。循環はエラー
 //  ・rotation はオイラー角 (度)。X → Y → Z の順に回す (world = 親 × T × Rz × Ry × Rx × S)
 //  ・model は "builtin:cube" (立方体) か "asset:<ID>" (取り込んだモデル。ID は assets/ の .meta の id、M5-3)
-//  ・color と layer はマテリアル (M5-4) ができるまでの仮の項目。layer はレンダーグラフの drawList の layer と合わせる
+//  ・materials はスロットの名前 → マテリアルのファイル (M5-4)。書いていないスロットは、取り込んだ値 (モデルのスロットの
+//    基本色とテクスチャ) の標準のマテリアルで描く。立方体のスロットは "Default"
+//  ・color はマテリアルの色に掛ける色 (同じモデルを 1 体ずつ色違いにする)。M5-2 の layer は読み飛ばす
 //  行列は列優先 (m[列 * 4 + 行]、OrbitCamera.h の Mat4 と同じ)。
 // ============================================================
 
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -40,8 +44,8 @@ struct SceneObject
 	std::array<float, 3> rotation { 0, 0, 0 };        // 度 (X → Y → Z の順に回す)
 	std::array<float, 3> scale    { 1, 1, 1 };
 	bool                 visible  = true;
-	std::array<float, 4> color    { 0.8f, 0.8f, 0.8f, 1 };   // 仮 (M5-4 でマテリアルに)
-	std::string          layer    = "Opaque";                // 仮 (M5-4 でマテリアルパスに)
+	std::array<float, 4> color    { 1, 1, 1, 1 };   // マテリアルの色に掛ける
+	std::map<std::string, std::string> materials;   // スロット → マテリアルのファイル (書いていなければ取り込んだ値)
 };
 
 struct SceneDesc

@@ -41,7 +41,6 @@ export function newObject(scene: SceneJson, prefix = 'cube'): SceneObjectJson {
     scale: [1, 1, 1],
     visible: true,
     color: [0.8, 0.8, 0.8, 1],
-    layer: 'Opaque',
   };
 }
 

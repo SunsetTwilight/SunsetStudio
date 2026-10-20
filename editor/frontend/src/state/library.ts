@@ -83,8 +83,7 @@ export function modelObject(scene: SceneJson, asset: LibraryAsset, parent: strin
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
     visible: true,
-    color: [1, 1, 1, 1], // モデルはスロットの基本色を使う (物体の色を掛ける)
-    layer: 'Opaque',
+    color: [1, 1, 1, 1], // マテリアルの色に掛ける (白 = そのまま)
   };
 }
 

@@ -23,6 +23,8 @@ import { StartScreen } from './panels/StartScreen';
 import { PreviewPanel, type PreviewParams } from './panels/PreviewPanel';
 import { AssetPanel, type AssetParams } from './panels/AssetPanel';
 import { PipelinePanel, type PipelineParams } from './panels/PipelinePanel';
+import { MaterialPanel, type MaterialParams } from './panels/MaterialPanel';
+import { loadMaterialFiles } from './state/material';
 import { ScenePanel } from './panels/ScenePanel';
 import { LibraryPanel } from './panels/LibraryPanel';
 import { loadLibrary } from './state/library';
@@ -49,6 +51,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   preview: (props) => <PreviewPanel {...(props as IDockviewPanelProps<PreviewParams>)} />,
   asset: (props) => <AssetPanel {...(props as IDockviewPanelProps<AssetParams>)} />,
   pipeline: (props) => <PipelinePanel {...(props as IDockviewPanelProps<PipelineParams>)} />,
+  material: (props) => <MaterialPanel {...(props as IDockviewPanelProps<MaterialParams>)} />,
 };
 
 export function App() {
@@ -76,6 +79,8 @@ export function App() {
     });
     // ライブラリ: 取り込み / 読み込みの状態が変わったら読み直す
     const offLibrary = on('library.changed', () => void loadLibrary());
+    // マテリアルのファイルが増えた / 変わった (一覧を読み直す。タブは自分で読み直す)
+    const offMaterial = on('material.changed', () => void loadMaterialFiles());
     const offPicked = on('scene.picked', (e) => {
       if (e.id) {
         studioStore.select({ kind: 'object', id: e.id });
@@ -97,6 +102,7 @@ export function App() {
       offScene();
       offPicked();
       offLibrary();
+      offMaterial();
     };
 
     if (!isConnected()) {
@@ -130,6 +136,7 @@ export function App() {
     call('viewport.state').then((r) => studioStore.setViewportFloating(r.floating)).catch(() => {});
     void loadShaderErrors();
     void loadScene();
+    void loadMaterialFiles();
   }, [project?.open, project?.file]);
 
   // 選んでいる物体をビューポートに伝える (辺の印)

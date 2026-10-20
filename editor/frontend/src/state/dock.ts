@@ -8,6 +8,7 @@
 //    openPreviewTab リソースのプレビューをタブ (パネル) で開く。外へ出すとネイティブの別ウィンドウにする
 //    openAssetTab   シェーダー / パイプラインの JSON をタブで編集する (Monaco)
 //    openPipelineTab パイプラインのタブ (シェーダーとのつながり、リフレクション)
+//    openMaterialTab マテリアルのタブ (リフレクションから作る欄で編集する。M5-4)
 //    defaultLayout  既定の配置 / resetLayout 既定に戻す
 // ============================================================
 import type { DockviewApi } from 'dockview-react';
@@ -157,6 +158,7 @@ function logError(text: string) {
 export const PREVIEW_PREFIX = 'preview:';
 export const ASSET_PREFIX = 'asset:';
 export const PIPELINE_PREFIX = 'pipeline:';
+export const MATERIAL_PREFIX = 'material:';
 
 // 編集のタブの置き場所: ほかの編集のタブがあればその隣、なければビューポートの右
 function openEditorTab(id: string, component: string, title: string, params: Record<string, unknown>) {
@@ -166,7 +168,7 @@ function openEditorTab(id: string, component: string, title: string, params: Rec
     existing.api.setActive();
     return;
   }
-  const other = dockApi.panels.find((p) => p.id.startsWith(ASSET_PREFIX) || p.id.startsWith(PIPELINE_PREFIX));
+  const other = dockApi.panels.find((p) => p.id.startsWith(ASSET_PREFIX) || p.id.startsWith(PIPELINE_PREFIX) || p.id.startsWith(MATERIAL_PREFIX));
   const viewport = dockApi.getPanel('viewport');
   dockApi.addPanel({
     id,
@@ -184,6 +186,10 @@ function openEditorTab(id: string, component: string, title: string, params: Rec
 
 export function openAssetTab(path: string) {
   openEditorTab(ASSET_PREFIX + path, 'asset', path.slice(path.lastIndexOf('/') + 1), { path });
+}
+
+export function openMaterialTab(path: string) {
+  openEditorTab(MATERIAL_PREFIX + path, 'material', `マテリアル: ${path.slice(path.lastIndexOf('/') + 1)}`, { path });
 }
 
 export function openPipelineTab(path: string) {

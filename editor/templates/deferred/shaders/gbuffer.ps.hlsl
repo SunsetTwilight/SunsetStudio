@@ -1,4 +1,4 @@
-// G-Buffer: アルベドとワールドの法線を書く
+// G-Buffer: アルベドとワールドの法線を書く (マテリアルのない描画用。物体はマテリアル (shaders/materials/) で描く)
 #include "common.hlsli"
 
 struct PSIn
@@ -17,7 +17,7 @@ struct MRT
 MRT main(PSIn i)
 {
 	MRT o;
-	o.albedo = float4(gColor.rgb, 1);
-	o.normal = float4(normalize(i.normal) * 0.5 + 0.5, 1);
+	o.albedo = float4(gColor.rgb, 0);                          // a = 金属度
+	o.normal = float4(normalize(i.normal) * 0.5 + 0.5, 0.6);   // w = 粗さ
 	return o;
 }

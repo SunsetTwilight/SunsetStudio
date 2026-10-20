@@ -71,8 +71,10 @@ Json sceneToJson(const SceneDesc& s)
 			{ "id", o.id }, { "name", o.name }, { "model", o.model },
 			{ "parent", o.parent.empty() ? Json(nullptr) : Json(o.parent) },
 			{ "position", arr(o.position) }, { "rotation", arr(o.rotation) }, { "scale", arr(o.scale) },
-			{ "visible", o.visible }, { "color", arr(o.color) }, { "layer", o.layer },
+			{ "visible", o.visible }, { "color", arr(o.color) },
 		};
+		if (!o.materials.empty())
+			j["materials"] = o.materials;
 		objects.push_back(std::move(j));
 	}
 	Json j = { { "version", s.version }, { "objects", objects } };
@@ -130,7 +132,19 @@ bool sceneFromJson(const Json& json, SceneDesc& out, SceneDiagnostics& diag)
 					else if (k == "scale") vec(x, "scale", o.scale);
 					else if (k == "color") vec(x, "color", o.color);
 					else if (k == "visible") { if (x.is_boolean()) o.visible = x.get<bool>(); else diag.errors.push_back(at + ".visible: 真偽値が必要です"); }
-					else if (k == "layer") str(x, "layer", o.layer);
+					else if (k == "materials")
+					{
+						if (!x.is_object()) { diag.errors.push_back(at + ".materials: オブジェクト ({ スロット: マテリアルのファイル }) が必要です"); continue; }
+						for (const auto& [slot, path] : x.items())
+						{
+							if (path.is_null()) continue;   // 割り当てなし (取り込んだ値)
+							if (!path.is_string() || path.get<std::string>().empty())
+								diag.errors.push_back(at + ".materials." + slot + ": マテリアルのファイルのパス (文字列) が必要です");
+							else
+								o.materials[slot] = path.get<std::string>();
+						}
+					}
+					else if (k == "layer") {}   // M5-2 の仮の項目 (M5-4 でマテリアルパスに置き換えた)。読み飛ばす
 					else diag.warnings.push_back(at + "." + k + ": 知らないキーなので無視します");
 				}
 				if (!validId(o.id))

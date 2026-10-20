@@ -39,6 +39,7 @@ Json modelInfo(const sa::Model& m)
 		{ "nodes", m.nodes.size() }, { "meshes", m.meshes.size() }, { "vertices", vertices }, { "triangles", triangles },
 		{ "slots", m.slots.size() }, { "skins", m.skins.size() }, { "morphs", morphs },
 		{ "boundsMin", m.boundsMin }, { "boundsMax", m.boundsMax },
+		{ "slotNames", [&] { Json a = Json::array(); for (const auto& s : m.slots) a.push_back(s.name); return a; }() },
 	};
 }
 } // namespace
@@ -47,6 +48,7 @@ void EditorApp::openLibrary()
 {
 	++m_libraryGeneration;
 	m_modelStates.clear();
+	m_textureStates.clear();
 	m_library.close();
 	if (m_project)
 	{
@@ -134,15 +136,76 @@ void EditorApp::onModelLoaded(uint64_t generation, const std::string& id, uint64
 		st.status = "ready";
 		st.error.clear();
 		st.info   = modelInfo(*model);
+		st.slotMaterials = slotMaterials(id, *model);
 		st.info["loadMs"] = std::round(ms * 10) / 10;
 		const sa::AssetRecord* rec = m_library.find(id);
 		log("info", "library", "モデルを読みました: " + (rec ? rec->path : id) + " (" + std::to_string(st.info["triangles"].get<size_t>()) +
 		                       " 三角形、" + std::to_string(static_cast<int>(ms)) + " ms)");
 	}
-	m_render.postScene([id, model](GraphicsEngine& engine, ViewportRenderer* scene) {
-		if (scene) scene->setModel(engine, id, model.get());
+	m_render.postScene([id, model, slots = st.slotMaterials](GraphicsEngine& engine, ViewportRenderer* scene) {
+		if (scene) scene->setModel(engine, id, model.get(), &slots);
 	});
 	m_host.emit("library.changed", Json::object());
+}
+
+std::vector<MaterialDesc> EditorApp::slotMaterials(const std::string& modelId, const sa::Model& model) const
+{
+	std::vector<MaterialDesc> out;
+	const sa::AssetRecord* rec = m_library.find(modelId);
+	for (const sa::MaterialSlot& slot : model.slots)
+	{
+		MaterialDesc m = ViewportRenderer::standardMaterial(slot.baseColor, slot.metallic, slot.roughness);
+		if (slot.alphaMode == sa::AlphaMode::Mask)
+			m.params["alphaCutoff"] = std::round(static_cast<double>(slot.alphaCutoff) * 1e6) / 1e6;
+		// 参照しているテクスチャが取り込まれていれば使う (標準のマテリアルの変数名。glTF と同じ意味)
+		auto tex = [&](const char* name, const sa::TextureRef& ref) {
+			if (!rec || !ref.used())
+				return;
+			if (const sa::AssetRecord* t = m_library.findReferenced(*rec, ref.path); t && t->meta.importer == "texture")
+				m.textures[name] = "asset:" + t->id.toString();
+		};
+		tex("baseColorMap", slot.baseColorTexture);
+		tex("normalMap", slot.normalTexture);
+		tex("metallicRoughnessMap", slot.metallicRoughnessTexture);
+		out.push_back(std::move(m));
+	}
+	return out;
+}
+
+void EditorApp::requestTexture(const std::string& id)
+{
+	TextureState& st = m_textureStates[id];
+	const uint64_t ticket = ++st.ticket;
+	const sa::AssetRecord* rec = m_library.find(id);
+	if (!rec || rec->missing || rec->meta.importer != "texture")
+	{
+		st.status = "error";
+		log("warning", "library", "テクスチャ " + id + ": " + (!rec ? std::string("アセットがありません") : rec->missing ? "元のファイルがありません: " + rec->path
+		                                                                                                    : "テクスチャではありません: " + rec->path));
+		m_render.postScene([id](GraphicsEngine& engine, ViewportRenderer* scene) {
+			if (scene) scene->materials().setTexture(engine, id, nullptr);
+		});
+		return;
+	}
+	st.status = "loading";
+	const uint64_t generation = m_libraryGeneration;
+	m_libraryWorker.post([this, rec = *rec, cache = m_library.cacheDir(), generation, id, ticket] {
+		sa::Diagnostics diag;
+		std::shared_ptr<const sa::Texture> texture = m_library.loadTexture(rec, cache, diag);
+		m_host.post([this, generation, id, ticket, texture, diag] {
+			if (generation != m_libraryGeneration)
+				return;
+			auto it = m_textureStates.find(id);
+			if (it == m_textureStates.end() || it->second.ticket != ticket)
+				return;
+			it->second.status = texture ? "ready" : "error";
+			for (const auto& w : diag.warnings) log("warning", "library", w);
+			for (const auto& e : diag.errors)   log("error", "library", "テクスチャを読めません: " + e);
+			m_render.postScene([id, texture](GraphicsEngine& engine, ViewportRenderer* scene) {
+				if (scene) scene->materials().setTexture(engine, id, texture);
+			});
+		});
+	});
 }
 
 void EditorApp::registerLibraryMethods()
@@ -203,6 +266,16 @@ void EditorApp::registerLibraryMethods()
 		}
 		for (const auto& id : reload)
 			requestModel(id);
+		// 読んだことのあるテクスチャで、元のファイル / 設定が変わったもの
+		std::vector<std::string> reloadTextures;
+		for (const auto& [id, st] : m_textureStates)
+		{
+			const sa::AssetRecord* rec = m_library.find(id);
+			if (st.status != "loading" && rec && !rec->missing && !m_library.database().upToDate(*rec, m_library.cacheDir()))
+				reloadTextures.push_back(id);
+		}
+		for (const auto& id : reloadTextures)
+			requestTexture(id);
 		m_host.emit("library.changed", Json::object());
 		r.ok({ { "created", scan.created }, { "reIded", scan.reIded }, { "reloaded", reload } });
 	});
@@ -230,6 +303,8 @@ void EditorApp::registerLibraryMethods()
 		std::filesystem::remove(sa::AssetDatabase::artifactPath(m_library.cacheDir(), rec->id), ec);
 		if (rec->meta.importer == "model")
 			requestModel(id);
+		else if (rec->meta.importer == "texture" && m_textureStates.contains(id))
+			requestTexture(id);
 		m_host.emit("library.changed", Json::object());
 		r.ok({ { "id", id } });
 	});

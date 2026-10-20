@@ -17,6 +17,7 @@
 
 #include "sunset/asset/AssetDatabase.h"
 #include "sunset/asset/model/Model.h"
+#include "sunset/asset/texture/Texture.h"
 
 #include <nlohmann/json.hpp>
 
@@ -68,6 +69,14 @@ public:
 	std::shared_ptr<const sunset::asset::Model> loadModel(const sunset::asset::AssetRecord& record,
 	                                                       const std::filesystem::path& cacheDir,
 	                                                       sunset::asset::Diagnostics& diag) const;
+
+	// テクスチャを読む (loadModel と同じく、どのスレッドから呼んでもよい)
+	std::shared_ptr<const sunset::asset::Texture> loadTexture(const sunset::asset::AssetRecord& record,
+	                                                           const std::filesystem::path& cacheDir,
+	                                                           sunset::asset::Diagnostics& diag) const;
+
+	// モデルが参照しているファイル (元のファイルからの相対パス) のアセット。なければ nullptr
+	const sunset::asset::AssetRecord* findReferenced(const sunset::asset::AssetRecord& model, const std::string& relative) const;
 
 private:
 	sunset::asset::ImporterRegistry               m_registry;

@@ -27,7 +27,7 @@ describe('アセットのライブラリ', () => {
     const a = asset('0123456789abcdef0123456789abcdef', 'hero/hero.fbx', {
       model: {
         status: 'ready',
-        info: { nodes: 1, meshes: 1, vertices: 3, triangles: 1, slots: 1, skins: 0, morphs: 0, boundsMin: [-1, -0.5, -1], boundsMax: [1, 2, 1], loadMs: 1 },
+        info: { nodes: 1, meshes: 1, vertices: 3, triangles: 1, slots: 1, skins: 0, morphs: 0, boundsMin: [-1, -0.5, -1], boundsMax: [1, 2, 1], loadMs: 1, slotNames: [] },
       },
     });
     const scene: SceneJson = { version: 1, objects: [] };
