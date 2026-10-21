@@ -149,6 +149,7 @@ private:
 	void runGraphSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 	void runShaderSelfCheck(std::function<void(bool ok, const std::string& error)> done);
 	void runSceneSelfCheck(std::function<void(bool ok, const std::string& error)> done);
+	void compileSmokeShaders(std::vector<std::string> paths, std::function<void(bool ok, const std::string& error)> done);
 
 	EditorOptions  m_options;
 	WebHost        m_host;       // 破棄の順: 描画スレッド → ビューポート → WebView
@@ -169,7 +170,7 @@ private:
 	bool     m_engineDone    = false;
 	bool     m_engineOk      = false;
 	uint64_t m_framesDrawn   = 0;
-	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, Windows, Shader, WaitAfter, EmptyProject, EmptyFrames, Finished };
+	enum class SmokeStage { WaitProject, WaitFrames, Inspector, Graph, Viewer, Windows, Shader, WaitAfter, EmptyProject, EmptyFrames, EmptyShaders, Finished };
 	SmokeStage m_smokeStage    = SmokeStage::WaitProject;
 	bool       m_smokeProjectFailed = false;
 	bool       m_smokeSceneReady    = false;   // テンプレートのシーンを既定のシーン (立方体 49 個) に置き換えた

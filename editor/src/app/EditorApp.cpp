@@ -907,10 +907,36 @@ void EditorApp::checkSmokeTest()
 		if (!m_sceneError.empty() || !m_sceneData.objects.empty())
 			return finish(14, "空のプロジェクトのシーンが空でない: " + m_sceneError);
 		log("info", "smoke", "project.create: 空のテンプレートから作って開き、エラーなく描けた");
-		return finish(0, "");
+		// 移行で足した標準のマテリアルのシェーダーが、空のプロジェクトでもコンパイルできること (Opaque の描画ノードで使う)
+		m_smokeStage = SmokeStage::EmptyShaders;
+		compileSmokeShaders({ "shaders/materials/standard.gbuffer.vs.hlsl", "shaders/materials/standard.gbuffer.ps.hlsl",
+		                      "shaders/materials/standard.shadow.vs.hlsl", "shaders/materials/standard.shadow.ps.hlsl" },
+			[this, finish](bool ok, const std::string& error) {
+				m_host.post([this, finish, ok, error] {
+					if (!ok)
+						return finish(14, "空のプロジェクトで標準のマテリアルのシェーダーをコンパイルできない: " + error);
+					log("info", "smoke", "shader.compile: 空のプロジェクトで標準のマテリアルのシェーダーをコンパイルできた");
+					finish(0, "");
+				});
+			});
+		return;
 	default:
 		return;
 	}
+}
+
+// ファイルを順に shader.compile し、最初の失敗で止める (スモークテストの空のプロジェクトの段階)
+void EditorApp::compileSmokeShaders(std::vector<std::string> paths, std::function<void(bool ok, const std::string& error)> done)
+{
+	if (paths.empty())
+		return done(true, "");
+	const std::string path = paths.front();
+	paths.erase(paths.begin());
+	m_host.bridge().callLocal("shader.compile", { { "path", path } }, [this, paths, path, done](int s, const Json& r) {
+		if (s != 0 || !r.value("ok", false))
+			return done(false, path + ": " + (s != 0 ? r.dump() : r.value("messages", std::string())));
+		m_host.post([this, paths, done] { compileSmokeShaders(paths, done); });
+	});
 }
 
 // シェーダー編集の経路を、フロントエンドと同じ Bridge のメソッドで呼ぶ

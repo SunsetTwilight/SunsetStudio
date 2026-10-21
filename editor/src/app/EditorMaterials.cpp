@@ -39,21 +39,22 @@ void EditorApp::ensureMaterialSupport(const Project& project)
 	const std::filesystem::path root = project.assetRoot();
 	std::error_code ec;
 	std::vector<std::string> added;
+	auto copyIfMissing = [&](const std::filesystem::path& from, const std::string& rel) {
+		const std::filesystem::path to = root / pathFromUtf8(rel);
+		if (std::filesystem::exists(to, ec))
+			return;
+		std::filesystem::create_directories(to.parent_path(), ec);
+		if (std::filesystem::copy_file(from, to, ec))
+			added.push_back(rel);
+	};
 	for (const char* dir : { "pipelines/materials", "shaders/materials", "lights" })   // lights: M5-5 のライトの種類
 	{
-		const std::filesystem::path from = tmpl / pathFromUtf8(dir);
-		for (const auto& e : std::filesystem::directory_iterator(from, ec))
-		{
-			if (!e.is_regular_file(ec))
-				continue;
-			const std::filesystem::path to = root / pathFromUtf8(dir) / e.path().filename();
-			if (std::filesystem::exists(to, ec))
-				continue;
-			std::filesystem::create_directories(to.parent_path(), ec);
-			if (std::filesystem::copy_file(e.path(), to, ec))
-				added.push_back(std::string(dir) + "/" + pathToUtf8(e.path().filename()));
-		}
+		for (const auto& e : std::filesystem::directory_iterator(tmpl / pathFromUtf8(dir), ec))
+			if (e.is_regular_file(ec))
+				copyIfMissing(e.path(), std::string(dir) + "/" + pathToUtf8(e.path().filename()));
 	}
+	// shaders/materials/*.hlsli が include する共通の定数 (空のテンプレートにはない)
+	copyIfMissing(tmpl / "shaders" / "common.hlsli", "shaders/common.hlsli");
 	std::filesystem::create_directories(root / "materials", ec);
 	if (!added.empty())
 	{
