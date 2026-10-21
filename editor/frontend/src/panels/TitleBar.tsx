@@ -26,7 +26,7 @@ import {
   openRecent,
   ping,
   recentProjects,
-  saveScene,
+  saveAll,
   toggleMaximize,
   undoRedo,
 } from '../state/commands';
@@ -46,7 +46,10 @@ export function TitleBar() {
   const floating = useStudio((s) => s.viewportFloating);
   const maximized = useStudio((s) => s.windowMaximized);
   const commandError = useStudio((s) => s.commandError);
+  const unsavedAny = useStudio((s) => s.unsaved?.any ?? false);
   const sceneDirty = useStudio((s) => s.scene?.dirty ?? false);
+  const unsaved = unsavedAny || sceneDirty; // 保存していない変更 (グラフ、パイプライン、シーン)
+  const storeNotice = useStudio((s) => s.notice);
   const frame = isConnected() && !!info?.window?.customFrame;
   const devTools = !!info?.window?.devTools;
   const open = !!project?.open;
@@ -60,6 +63,11 @@ export function TitleBar() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [notice, setNotice] = useState('');
   const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!storeNotice) return;
+    const t = window.setTimeout(() => studioStore.setNotice(''), 4000);
+    return () => window.clearTimeout(t);
+  }, [storeNotice]);
 
   const menus: Menu[] = useMemo(() => {
     const panel = (id: string, mnemonic?: string): MenuItem => ({
@@ -85,7 +93,7 @@ export function TitleBar() {
             submenu: recent.map((p) => ({ id: `recent.${p.file}`, label: p.name, title: p.file, disabled: !p.exists, run: () => openRecent(p) })),
           },
           separator('s1'),
-          { id: 'save', label: 'シーンを保存', mnemonic: 'S', disabled: !open, title: 'scenes/ のシーンのファイルに書く', run: saveScene },
+          { id: 'save', label: 'すべて保存', mnemonic: 'S', shortcut: 'Ctrl+S', disabled: !open, title: '保存していないレンダーグラフ (ノードエディター)、パイプライン、シーンをファイルに書く', run: saveAll },
           separator('s2'),
           { id: 'import', label: 'アセットを取り込む…', mnemonic: 'I', disabled: !open, title: 'assets/ にコピーして取り込む (モデル / テクスチャ)', run: () => importAsset('copy') },
           { id: 'link', label: '外部のファイルを参照…', mnemonic: 'L', disabled: !open, title: 'コピーせず、外部のファイルを参照する', run: () => importAsset('link') },
@@ -350,7 +358,7 @@ export function TitleBar() {
     void call('window.startResize', { edge }).catch(() => {});
   };
 
-  const title = open ? `${project?.name}${sceneDirty ? ' ●' : ''} - SunsetEditor` : 'SunsetEditor';
+  const title = open ? `${project?.name}${unsaved ? ' ●' : ''} - SunsetEditor` : 'SunsetEditor';
   useEffect(() => {
     document.title = title;
   }, [title]);
@@ -434,7 +442,7 @@ export function TitleBar() {
             </button>
           </span>
         )}
-        {notice && <span className="muted titlebar-notice">{notice}</span>}
+        {(notice || storeNotice) && <span className="muted titlebar-notice">{notice || storeNotice}</span>}
       </div>
       {frame && (
         <div className="window-controls">

@@ -3,7 +3,7 @@
 //  パネルは dockview の中で別々に描かれるので、props ではなくここから読む (useStudio)。
 // ============================================================
 import { useSyncExternalStore } from 'react';
-import type { AppInfo, EditState, EngineInfo, LibraryInfo, LightTypeInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, SceneInfo, ViewerPixel, ViewerSettings } from '../bridge/protocol';
+import type { AppInfo, EditState, EngineInfo, LibraryInfo, LightTypeInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, SceneInfo, ViewerPixel, ViewerSettings, Unsaved } from '../bridge/protocol';
 
 // インスペクターに表示するもの (グラフのパネルで選ぶ)
 export type Selection =
@@ -26,6 +26,9 @@ export interface StudioState {
   viewerPixel: ViewerPixel | null;
   previews: PreviewInfo[]; // 別ウィンドウのプレビュー
   viewportFloating: boolean; // ビューポートを別ウィンドウにしている
+  unsaved: Unsaved | null; // 保存していない変更
+  closePrompt: 'window' | 'project' | null;
+  notice: string; // タイトルバーに少しのあいだ出す知らせ (保存しました など) // 保存していない変更の確認を出している (ウィンドウを閉じる / プロジェクトを閉じる・開く)
   shaderErrors: Record<string, string>; // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ)
   pipelineShaders: Record<string, PipelineShaders>; // パイプラインのアセット → シェーダーのファイル
   scene: SceneInfo | null; // ビューポートのシーン (M5-2)
@@ -44,7 +47,7 @@ export interface PipelineShaders {
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, windowMaximized: false, commandError: '', materialFiles: [], lightTypes: [] };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, unsaved: null, closePrompt: null, notice: '', shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, windowMaximized: false, commandError: '', materialFiles: [], lightTypes: [] };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -75,6 +78,9 @@ export const studioStore = {
   setViewerPixel: (viewerPixel: ViewerPixel) => set({ viewerPixel }),
   setPreviews: (previews: PreviewInfo[]) => set({ previews }),
   setViewportFloating: (viewportFloating: boolean) => set({ viewportFloating }),
+  setUnsaved: (unsaved: Unsaved | null) => set({ unsaved }),
+  setClosePrompt: (closePrompt: 'window' | 'project' | null) => set({ closePrompt }),
+  setNotice: (notice: string) => set({ notice }),
   setShaderErrors: (shaderErrors: Record<string, string>) => set({ shaderErrors }),
   setShaderStatus(path: string, ok: boolean, text: string) {
     const next = { ...state.shaderErrors };

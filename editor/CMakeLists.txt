@@ -57,6 +57,7 @@ add_executable(SunsetEditor
     src/app/EditorWindows.cpp
     src/app/EditorAssets.cpp
     src/app/EditorScene.cpp
+    src/app/EditorSave.cpp
     src/app/EditorLibrary.cpp
     src/app/EditorMaterials.cpp
     src/host/WebHost.h

@@ -30,6 +30,7 @@ Json EditorApp::sceneInfoJson() const
 void EditorApp::emitSceneChanged()
 {
 	m_host.emit("scene.changed", { { "revision", m_sceneRevision }, { "dirty", m_sceneDirty } });
+	m_host.emit("unsaved.changed", unsavedJson());
 }
 
 void EditorApp::pushSceneToRenderer()

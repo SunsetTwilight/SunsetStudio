@@ -292,6 +292,11 @@ bool WebHost::isMaximized() const
 	return top && IsZoomed(top);
 }
 
+void WebHost::cancelClose()
+{
+	m_closePending = false;
+}
+
 void WebHost::closeWindow()
 {
 	if (HWND top = static_cast<HWND>(nativeWindow()))

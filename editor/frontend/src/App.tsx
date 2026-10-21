@@ -32,7 +32,8 @@ import { loadScene } from './state/scene';
 import { loadPipelineShaders, loadShaderErrors } from './state/assets';
 import { ViewerPanel } from './panels/ViewerPanel';
 import { TitleBar } from './panels/TitleBar';
-import { undoRedo } from './state/commands';
+import { UnsavedDialog } from './panels/UnsavedDialog';
+import { undoRedo, saveAll } from './state/commands';
 import { NodeEditorPanel } from './nodegraph/NodeEditorPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
 import { defaultLayout, setDockApi, showPanel, watchDragOut } from './state/dock';
@@ -70,6 +71,11 @@ export function App() {
     const offViewer = on('viewer.pixel', studioStore.setViewerPixel);
     const offPreview = on('preview.changed', (e) => studioStore.setPreviews(e.previews));
     const offFloat = on('viewport.changed', (e) => studioStore.setViewportFloating(e.floating));
+    const offUnsaved = on('unsaved.changed', studioStore.setUnsaved);
+    const offCloseReq = on('app.closeRequested', (e) => {
+      studioStore.setUnsaved(e);
+      studioStore.setClosePrompt('window');
+    });
     const offShader = on('shader.status', (e) => studioStore.setShaderStatus(e.path, e.ok, e.text));
     // シーン: 元に戻す / やり直す / 保存で変わったら読み直す。ビューポートのクリックで選ぶ
     const offScene = on('scene.changed', (e) => {
@@ -98,6 +104,8 @@ export function App() {
       offViewer();
       offPreview();
       offFloat();
+      offUnsaved();
+      offCloseReq();
       offShader();
       offScene();
       offPicked();
@@ -134,6 +142,7 @@ export function App() {
     call('viewer.get').then(studioStore.setViewer).catch(() => {});
     call('preview.list').then((r) => studioStore.setPreviews(r.previews)).catch(() => {});
     call('viewport.state').then((r) => studioStore.setViewportFloating(r.floating)).catch(() => {});
+    call('project.unsaved').then(studioStore.setUnsaved).catch(() => {});
     void loadShaderErrors();
     void loadScene();
     void loadMaterialFiles();
@@ -156,6 +165,13 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.altKey || e.metaKey) return;
       const key = e.key.toLowerCase();
+      // Ctrl+S: すべて保存 (コードエディターの中では、そのファイルの保存を優先する)
+      if (key === 's' && !e.shiftKey) {
+        if ((e.target as HTMLElement | null)?.closest?.('.monaco-editor')) return;
+        e.preventDefault();
+        void saveAll();
+        return;
+      }
       if (key !== 'z' && key !== 'y') return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((t as HTMLInputElement).type)))) return;
@@ -170,6 +186,7 @@ export function App() {
   return (
     <div className="app">
       <TitleBar />
+      <UnsavedDialog />
 
       {connError && <div className="banner error">{connError}</div>}
 

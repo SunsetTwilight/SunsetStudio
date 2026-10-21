@@ -26,16 +26,56 @@ async function run(fn: () => Promise<void>) {
   }
 }
 
+// ---- 保存 ----
+// 保存していないものをすべて書く (レンダーグラフ、パイプライン、シーン)。Ctrl+S
+export const saveAll = () =>
+  run(async () => {
+    if (!studioStore.get().project?.open) return;
+    const r = await call('project.saveAll');
+    studioStore.setNotice(r.saved.length ? `保存しました: ${r.saved.join(', ')}` : '保存していない変更はありません');
+  });
+
+// 保存していない変更があれば確認を出し、答えのあとで next を続ける (プロジェクトを閉じる / 開く)
+let afterPrompt: (() => Promise<void>) | null = null;
+async function confirmUnsaved(next: () => Promise<void>) {
+  if (studioStore.get().project?.open && studioStore.get().unsaved?.any) {
+    afterPrompt = next;
+    studioStore.setClosePrompt('project');
+    return;
+  }
+  await next();
+}
+
+// 確認の答え。window はウィンドウを閉じるとき (C++ が app.closeRequested で頼んだもの)
+export const answerClosePrompt = (action: 'save' | 'discard' | 'cancel') =>
+  run(async () => {
+    const kind = studioStore.get().closePrompt;
+    studioStore.setClosePrompt(null);
+    if (kind === 'window') {
+      await call('app.closeAnswer', { action });
+      return;
+    }
+    const next = afterPrompt;
+    afterPrompt = null;
+    if (action === 'cancel' || !next) return;
+    if (action === 'save') await call('project.saveAll');
+    await next();
+  });
+
 // ---- プロジェクト ----
 export const closeProject = () =>
-  run(async () => {
-    studioStore.setProject(await call('project.close'));
-  });
+  run(() =>
+    confirmUnsaved(async () => {
+      studioStore.setProject(await call('project.close'));
+    }),
+  );
 
 // 開いているプロジェクトがあれば閉じてから開く (別のプロジェクトのパネルやプレビューを残さない)
 async function openFile(file: string) {
-  if (studioStore.get().project?.open) studioStore.setProject(await call('project.close'));
-  studioStore.setProject(await call('project.open', { file }));
+  await confirmUnsaved(async () => {
+    if (studioStore.get().project?.open) studioStore.setProject(await call('project.close'));
+    studioStore.setProject(await call('project.open', { file }));
+  });
 }
 
 export const openProjectDialog = () =>

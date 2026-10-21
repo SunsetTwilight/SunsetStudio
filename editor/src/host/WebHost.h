@@ -75,6 +75,7 @@ public:
 	void toggleMaximize();
 	bool isMaximized() const;
 	void closeWindow();                          // ×ボタンと同じ (閉じる前の後片付けも通る)
+	void cancelClose();                          // 閉じる操作を取りやめる (close handler が proceed を呼ばないとき)。UI スレッド
 	void startDrag();                            // マウスのボタンを押したまま、ウィンドウを動かす
 	bool startResize(const std::string& edge);   // "top" / "topleft" / "topright"。知らない辺なら false
 	bool openDevTools();                         // 開発者ツール (devTools が有効なときだけ)

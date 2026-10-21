@@ -250,6 +250,8 @@ void RenderThread::pollAssets()
 			m_callbacks.log(level, text);
 	};
 	for (const auto& p : r.reloadedPipelines) log("info", "パイプラインを作り直しました: " + p);
+	if ((!r.reloadedPipelines.empty() || r.graphReloaded) && m_callbacks.assetsReloaded)
+		m_callbacks.assetsReloaded();
 	for (const auto& p : r.failedPipelines)   log("warning", "パイプラインを作り直せませんでした (元のまま): " + p);
 	for (const auto& m : r.graphMessages)     log(m.rfind("error", 0) == 0 ? "error" : "warning", "グラフ: " + m);
 	if (r.graphReloaded)   log("info", "グラフを読み直しました: " + m_scene.graphFile());

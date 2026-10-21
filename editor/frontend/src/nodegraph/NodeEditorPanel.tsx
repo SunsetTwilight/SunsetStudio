@@ -31,6 +31,7 @@ import '@xyflow/react/dist/style.css';
 import { isConnected } from '../bridge/client';
 import type { GraphInfo, JsonObject } from '../bridge/protocol';
 import { setViewer, showInViewer, openPreview } from '../panels/ViewerPanel';
+import { saveAll } from '../state/commands';
 import { openAssetTab, openPipelineTab, openPreviewTab, showPanel } from '../state/dock';
 import { call } from '../bridge/client';
 import { fileName, loadPipelineShaders, shaderErrorsOf, withShaderFile, type Stage } from '../state/assets';
@@ -108,6 +109,7 @@ function NodeEditor() {
   // ノードの右クリックのメニュー (screen は別ウィンドウを出す場所)
   const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string; screen: { x: number; y: number } } | null>(null);
   const viewer = useStudio((s) => s.viewer);
+  const graphUnsaved = useStudio((s) => !!s.unsaved && (s.unsaved.graph || s.unsaved.pipelines.length > 0));
   const pipelineShaders = useStudio((s) => s.pipelineShaders);
   const shaderErrors = useStudio((s) => s.shaderErrors);
   const [newShader, setNewShader] = useState<{ pass: string; pipeline: string; stage: Stage } | null>(null);
@@ -379,12 +381,18 @@ function NodeEditor() {
     >
       <header className="panel-header">
         <span className="panel-title">ノードエディター</span>
+        {graphUnsaved && (
+          <span className="unsaved-mark" title="レンダーグラフ / パイプラインに保存していない変更があります (Ctrl+S ですべて保存)">
+            ● 未保存
+          </span>
+        )}
         <span className="spacer" />
         <button onClick={() => void doAddDrawNode(centerOfView())} title="メッシュを描くノードを加える (既定の VS / PS / パイプラインも作る。描画レイヤーの名前はノードの名前)">
           ＋ 描画ノード
         </button>
         <button onClick={() => doAddPass('Raster', centerOfView())} title="Raster のパス (全画面) を加える">＋ パス</button>
         <button onClick={() => doAddResource('texture', centerOfView())} title="テクスチャを加える">＋ リソース</button>
+        <button onClick={() => void saveAll()} title="レンダーグラフとパイプラインとシーンを保存する (Ctrl+S)">保存</button>
         <button onClick={relayout} title="パスとリソースを、書く → 読むの順に左から右へ並べ直す">自動配置</button>
         <button onClick={() => flow.fitView({ padding: 0.15 })}>全体を表示</button>
       </header>

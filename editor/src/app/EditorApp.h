@@ -95,6 +95,11 @@ private:
 	void registerWindowMethods();   // EditorWindows.cpp
 	void registerAssetMethods();    // EditorAssets.cpp
 	void registerSceneMethods();    // EditorScene.cpp
+	void registerSaveMethods();     // EditorSave.cpp
+	// 保存していない変更 (EditorSave.cpp、UI スレッド)
+	Json unsavedJson() const;
+	void refreshUnsaved();          // 調べ直して unsaved.changed を送る
+	void saveAll(std::function<void(bool ok, const Json& result, const std::string& error)> done);
 	void registerLibraryMethods();  // EditorLibrary.cpp
 	// ---- アセットのライブラリ (EditorLibrary.cpp、UI スレッド) ----
 	void openLibrary();                               // プロジェクトを開いた / 閉じたとき
@@ -216,7 +221,13 @@ private:
 	std::string m_sceneError;      // 読めなかった理由 (空でなければ編集 / 保存を断る)
 	std::string m_sceneSelection;
 	uint64_t    m_sceneRevision = 0;
-	bool        m_sceneDirty    = false;   // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ。UI スレッド)
+	bool        m_sceneDirty    = false;
+	// 保存していない変更 (EditorSave.cpp。UI スレッド)
+	bool                     m_unsavedGraph = false;
+	std::vector<std::string> m_unsavedPipelines;
+	bool                     m_unsavedBusy  = false;
+	bool                     m_unsavedAgain = false;
+	bool                     m_closeConfirmed = false;   // 閉じるときの確認に答えた (保存した / 破棄した)   // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ。UI スレッド)
 	// アセットのライブラリ (UI スレッドだけが触る。取り込みは m_libraryWorker で)
 	ProjectAssets   m_library;
 	uint64_t        m_libraryGeneration = 0;   // プロジェクトを開き直したら上げる (前のプロジェクトの結果を捨てる)

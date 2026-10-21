@@ -320,6 +320,7 @@ int EditorApp::run()
 	registerWindowMethods();
 	registerAssetMethods();
 	registerSceneMethods();
+	registerSaveMethods();
 	registerLibraryMethods();
 	registerMaterialMethods();
 	m_recent.load();
@@ -341,7 +342,11 @@ int EditorApp::run()
 			++m_viewportErrors;   // スモークテスト: テンプレートのシェーダー / パイプラインが動くか
 		log(level.c_str(), "viewport", text);
 	};
-	callbacks.graphChanged = [this](uint64_t revision) { m_host.emit("graph.changed", { { "revision", revision } }); };
+	callbacks.graphChanged = [this](uint64_t revision) {
+		m_host.emit("graph.changed", { { "revision", revision } });
+		m_host.post([this] { refreshUnsaved(); });   // 編集 / 読み直しで、保存していない変更が変わる
+	};
+	callbacks.assetsReloaded = [this] { m_host.post([this] { refreshUnsaved(); }); };
 	callbacks.viewer = [this](const ResourceViewer::Probe& p, const std::string& status) {
 		Json j = { { "status", status } };
 		if (p.valid)
@@ -383,7 +388,14 @@ int EditorApp::run()
 
 	// ×ボタンで閉じるときは、ビューポートのスワップチェーンを先に解放してからウィンドウを閉じる
 	// 別ウィンドウ (プレビュー、ビューポートの枠) もメインのウィンドウと一緒に壊れるので、先にスワップチェーンを解放する
+	// 保存していない変更があれば、UI に確認を出してもらう (答えは app.closeAnswer)
 	m_host.setCloseHandler([this](std::function<void()> proceed) {
+		const bool unsaved = m_project && (m_unsavedGraph || !m_unsavedPipelines.empty() || m_sceneDirty);
+		if (unsaved && !m_closeConfirmed && !m_options.smokeTest)
+		{
+			m_host.emit("app.closeRequested", unsavedJson());
+			return;   // proceed を呼ばない (cancelClose か、答えのあとの closeWindow で続く)
+		}
 		releaseWindows([this, proceed] { m_render.detachViewport([this, proceed] { m_host.post(proceed); }); });
 	});
 
@@ -1487,6 +1499,7 @@ void EditorApp::recordEdit(UndoStack::Entry entry)
 void EditorApp::emitEditState()
 {
 	m_host.emit("edit.changed", m_undo.state());
+	refreshUnsaved();   // 編集、元に戻す / やり直すのあと
 }
 
 void EditorApp::registerEditMethods()

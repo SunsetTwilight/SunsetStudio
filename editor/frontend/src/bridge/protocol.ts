@@ -356,6 +356,14 @@ export interface ShaderStatus {
   text: string;
 }
 
+// 保存していない変更 (project.unsaved / unsaved.changed)
+export interface Unsaved {
+  graph: boolean; // レンダーグラフ (ノードエディター)
+  pipelines: string[]; // パイプラインのアセット
+  scene: boolean;
+  any: boolean;
+}
+
 // 別ウィンドウのプレビュー (preview.*)
 export interface PreviewInfo {
   id: number;
@@ -393,6 +401,9 @@ export interface Methods {
     result: { id: string; desc: JsonObject; warnings: string[] };
   };
   'pipeline.save': { params: { id: string }; result: { id: string } };
+  'project.unsaved': { params: Record<string, never>; result: Unsaved };
+  'project.saveAll': { params: Record<string, never>; result: { saved: string[] } };
+  'app.closeAnswer': { params: { action: 'save' | 'discard' | 'cancel' }; result: { closing: boolean } };
   'pipeline.growTable': { params: { id: string; param: number; size: number; label?: string }; result: { grown: boolean; size: number } };
   'graph.get': { params: Record<string, never>; result: GraphInfo };
   'graph.set': { params: { graph: JsonObject; label?: string }; result: GraphInfo };
@@ -475,6 +486,8 @@ export interface Events {
   'viewer.pixel': ViewerPixel;
   'preview.changed': { previews: PreviewInfo[] };
   'viewport.changed': { floating: boolean };
+  'unsaved.changed': Unsaved;
+  'app.closeRequested': Unsaved;
   'shader.status': ShaderStatus;
   'scene.changed': { revision: number; dirty: boolean };
   'scene.picked': { id: string };
