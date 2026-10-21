@@ -54,6 +54,7 @@ add_executable(studio_tests_unit
     test_project_assets.cpp
     test_material_migration.cpp
     test_node_params.cpp
+    test_pass_linkage.cpp
     test_lights.cpp
 )
 target_link_libraries(studio_tests_unit PRIVATE studio_bridge studio_services studio_doctest studio_options)

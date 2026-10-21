@@ -3,6 +3,7 @@
 // ============================================================
 #include "EditorApp.h"
 #include "services/SchemaJson.h"
+#include "services/PassLinkage.h"
 
 #include "gfx/rendergraph/GraphJson.h"
 #include "host/FileDialog.h"
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <process.h>   // _getpid
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 
@@ -213,7 +215,7 @@ EditOutcome applyPipelineAssetEdit(ViewportRenderer& scene, const std::string& i
 //   ・それもなければ、新しい SRV のテーブル (空いている t レジスタ、数 1) をパイプラインに足す
 // 物体ごとのリソースのテーブル (グラフがつないでいないもの) は使わない。変えたら changed = true (履歴に入れる)
 EditOutcome allocInputSlot(ViewportRenderer& scene, const std::string& id, const std::string& passName, int32_t wantParam,
-                           uint32_t wantOffset, uint32_t& outParam, uint32_t& outOffset, bool& changed)
+                           uint32_t wantOffset, uint32_t& outParam, uint32_t& outOffset, bool& changed, int32_t wantRegister = -1)
 {
 	EditOutcome o;
 	changed = false;
@@ -250,7 +252,44 @@ EditOutcome allocInputSlot(ViewportRenderer& scene, const std::string& id, const
 		return true;
 	};
 
-	if (wantParam >= 0 && graphBound.count(static_cast<uint32_t>(wantParam)) && isSrvTable(static_cast<uint32_t>(wantParam)))
+	// t レジスタの指定 (シェーダーの変数から入力を作るとき): そのレジスタを指す場所を確保する
+	std::optional<uint32_t> newTableRegister;
+	if (wantRegister >= 0)
+	{
+		const uint32_t reg = static_cast<uint32_t>(wantRegister);
+		const std::vector<uint32_t> bound(graphBound.begin(), graphBound.end());
+		if (const auto pos = tablePosOfRegister(l, bound, 't', reg))
+		{
+			outParam  = pos->param;
+			outOffset = pos->offset;
+			return o.ok = true, o;   // もう指している (広げなくてよい)
+		}
+		// パスがつないでいる SRV のテーブルの最後のレンジのすぐ次なら、そのレンジを 1 つ伸ばす
+		for (uint32_t prm : graphBound)
+			if (isSrvTable(prm))
+			{
+				const GfxRootParameter& rp0 = l.parameters[prm];
+				GfxDescriptorRange& lastRange = l.ranges[rp0.firstRange + rp0.numRanges - 1];
+				if (lastRange.numDescriptors != 0xFFFFFFFFu && lastRange.registerSpace == 0 &&
+				    lastRange.baseShaderRegister + lastRange.numDescriptors == reg)
+				{
+					uint32_t total = 0;
+					for (uint32_t i = rp0.firstRange; i < rp0.firstRange + rp0.numRanges; ++i) total += l.ranges[i].numDescriptors;
+					outParam  = prm;
+					outOffset = total;   // 下で total + 1 個に広げる
+					wantParam = -2;      // 下の選び方を飛ばす
+					break;
+				}
+			}
+		if (wantParam != -2)
+			newTableRegister = reg;   // 新しいテーブルを、そのレジスタから作る
+	}
+
+	if (wantParam == -2)
+	{
+		// 上で決めた
+	}
+	else if (!newTableRegister && wantParam >= 0 && graphBound.count(static_cast<uint32_t>(wantParam)) && isSrvTable(static_cast<uint32_t>(wantParam)))
 	{
 		outParam  = static_cast<uint32_t>(wantParam);
 		outOffset = wantOffset;
@@ -259,7 +298,7 @@ EditOutcome allocInputSlot(ViewportRenderer& scene, const std::string& id, const
 	{
 		bool found = false;
 		for (uint32_t prm : graphBound)
-			if (isSrvTable(prm))
+			if (!newTableRegister && isSrvTable(prm))
 			{
 				outParam  = prm;
 				outOffset = nextOffset[prm];
@@ -272,12 +311,14 @@ EditOutcome allocInputSlot(ViewportRenderer& scene, const std::string& id, const
 			if (l.numParameters >= GFX_MAX_ROOT_PARAMETERS || l.numRanges >= GFX_MAX_DESCRIPTOR_RANGES)
 				return o.message = "パイプライン '" + id + "' にルートパラメーターを足せません (数の上限)", o;
 			uint32_t reg = 0;
-			for (uint32_t i = 0; i < l.numRanges; ++i)
+			for (uint32_t i = 0; !newTableRegister && i < l.numRanges; ++i)
 				if (l.ranges[i].rangeType == GfxDescriptorRangeType::SRV && l.ranges[i].registerSpace == 0 && l.ranges[i].numDescriptors != 0xFFFFFFFFu)
 					reg = std::max(reg, l.ranges[i].baseShaderRegister + l.ranges[i].numDescriptors);
-			for (uint32_t i = 0; i < l.numParameters; ++i)
+			for (uint32_t i = 0; !newTableRegister && i < l.numParameters; ++i)
 				if (l.parameters[i].parameterType == GfxRootParameterType::SRV && l.parameters[i].registerSpace == 0)
 					reg = std::max(reg, l.parameters[i].shaderRegister + 1);
+			if (newTableRegister)
+				reg = *newTableRegister;
 			GfxDescriptorRange& dr = l.ranges[l.numRanges];
 			dr = {};
 			dr.rangeType          = GfxDescriptorRangeType::SRV;
@@ -390,6 +431,7 @@ int EditorApp::run()
 	registerSaveMethods();
 	registerLibraryMethods();
 	registerProjectFileMethods();
+	registerLinkageMethods();
 	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
@@ -731,13 +773,14 @@ void EditorApp::registerMethods()
 		const std::string pass   = p.at("pass").get<std::string>();
 		const int32_t     param  = p.value("param", -1);
 		const uint32_t    offset = p.value("offset", 0u);
+		const int32_t     reg    = p.value("register", -1);   // シェーダーの t レジスタを指す場所にする
 		const std::string label  = p.value("label", id + " に入力の場所を足す");
-		m_render.postScene([this, r, id, pass, param, offset, label, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+		m_render.postScene([this, r, id, pass, param, offset, reg, label, noScene](GraphicsEngine&, ViewportRenderer* scene) {
 			if (!scene)
 				return noScene(r);
 			uint32_t outParam = 0, outOffset = 0;
 			bool changed = false;
-			EditOutcome o = allocInputSlot(*scene, id, pass, param, offset, outParam, outOffset, changed);
+			EditOutcome o = allocInputSlot(*scene, id, pass, param, offset, outParam, outOffset, changed, reg);
 			if (!o.ok)
 				return r.error(o.code, o.message);
 			if (changed)

@@ -101,16 +101,9 @@ NodeResources::Interface NodeResources::build(const gfx::rg::PassDesc& pass)
 	auto reflect = [&](const gfx::rg::ShaderStageAsset& st, ShaderStage stage) -> bool {
 		if (!st.used())
 			return true;
-		ShaderLibrary::Options opts;
-		opts.entryPoint = st.entry;
-		opts.profile    = st.profile;
-		opts.defines    = st.defines;
-		const ShaderHandle h = m_shaders->load(gfx::rg::pathFromUtf8(st.file), stage, opts);
-		if (!h.valid())
-			return itf.error = "シェーダー '" + st.file + "': " + m_shaders->lastError(), false;
-		auto r = std::make_unique<GfxShaderReflection>();
-		if (!m_engine->getShaderReflection(h, *r))
-			return itf.error = "シェーダー '" + st.file + "' のリフレクションを取れません", false;
+		auto r = reflectStage(st, stage, itf.error);
+		if (!r)
+			return false;
 		refls.push_back(std::move(r));
 		return true;
 	};
@@ -211,6 +204,21 @@ NodeResources::Interface NodeResources::build(const gfx::rg::PassDesc& pass)
 	}
 	itf.ok = true;
 	return itf;
+}
+
+std::unique_ptr<GfxShaderReflection> NodeResources::reflectStage(const gfx::rg::ShaderStageAsset& st, ShaderStage stage, std::string& error)
+{
+	ShaderLibrary::Options opts;
+	opts.entryPoint = st.entry;
+	opts.profile    = st.profile;
+	opts.defines    = st.defines;
+	const ShaderHandle h = m_shaders->load(gfx::rg::pathFromUtf8(st.file), stage, opts);
+	if (!h.valid())
+		return error = "シェーダー '" + st.file + "': " + m_shaders->lastError(), nullptr;
+	auto r = std::make_unique<GfxShaderReflection>();
+	if (!m_engine->getShaderReflection(h, *r))
+		return error = "シェーダー '" + st.file + "' のリフレクションを取れません", nullptr;
+	return r;
 }
 
 void NodeResources::prepare(GraphicsEngine& engine, const Interface& itf, const Json& values, uint64_t version, Cache& cache)

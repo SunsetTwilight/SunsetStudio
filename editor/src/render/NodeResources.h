@@ -78,6 +78,9 @@ public:
 	// 描画のコマンドに、物体ごとのリソースをつなぐ
 	static void bind(ICommandBuffer* cb, const Interface& itf, const Cache& cache);
 
+	// シェーダーのステージのリフレクション (使っていない変数は入らない)。読めなければ nullptr (error に理由)
+	std::unique_ptr<GfxShaderReflection> reflectStage(const gfx::rg::ShaderStageAsset& st, ShaderStage stage, std::string& error);
+
 	// UI 用: { ok, error?, cbuffers: [{ name, vars: [{ name, type, columns, elements }] }],
 	//          textures: [{ name, srgb, default: "white" | "flatNormal" }] }
 	static Json describe(const Interface& itf);

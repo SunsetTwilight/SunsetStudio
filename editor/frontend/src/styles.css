@@ -423,6 +423,40 @@ select {
 .ref-row select {
   max-width: 130px;
 }
+.ref-row.linked {
+  flex-direction: column;
+  align-items: stretch;
+}
+.ref-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.link-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.link-line.ok {
+  color: #6aa9ff;
+}
+.link-line.warn {
+  color: #e0b050;
+}
+.ref-table + .link-line,
+.graph-editor > .link-line {
+  padding: 2px 8px;
+}
+.link-line button {
+  padding: 0 6px;
+  font-size: 11px;
+}
+.link-var b {
+  font-weight: 600;
+}
 .ref-bind {
   display: inline-flex;
   align-items: center;

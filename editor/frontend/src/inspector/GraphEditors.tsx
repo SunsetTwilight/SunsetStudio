@@ -2,14 +2,27 @@
 //  インスペクター: レンダーグラフのパスとリソースの編集
 //
 //    PassEditor     有効 / 無効、パイプライン、順序、入力と出力 (リソース、使い方、load、bind)
+//                   入力 / 出力ごとに、届く先のシェーダーの変数 (→ t0 gAlbedo / → SV_Target1) とずれの警告 (pass.linkage)。
+//                   宣言がなければ「宣言を作る」(pass.declare)、どの入力もつないでいない変数は「つなぐ」で入力を足す
 //    ResourceEditor フォーマット、大きさ、mip、サンプル数
 //  変えるたびにグラフ全体を graph.set で送り、エディターがコンパイルし直す (ビューポートにすぐ反映される)。
 //  コンパイルできない変更はエラー (理由とパス付き) になり、ビューポートは前のグラフのまま。
 // ============================================================
 import { useEffect, useState } from 'react';
-import { call } from '../bridge/client';
-import type { GraphInfo, JsonObject, JsonValue } from '../bridge/protocol';
-import { applyGraph, asArray, asObject, findPass, resourceNames, withPass, withResource, applyInputGraph } from '../state/graph';
+import { call, on } from '../bridge/client';
+import type { GraphInfo, JsonObject, JsonValue, PassLinkage, PassLinkRef } from '../bridge/protocol';
+import {
+  applyGraph,
+  asArray,
+  asObject,
+  findPass,
+  resourceNames,
+  withPass,
+  withResource,
+  applyInputGraph,
+  connectShaderVar,
+  errorText,
+} from '../state/graph';
 import { studioStore } from '../state/store';
 import { showInViewer } from '../panels/ViewerPanel';
 import { renamePass, renameResource, addInput, addOutput } from '../nodegraph/model';
@@ -91,12 +104,66 @@ export function NumberBox({ value, min, step, onCommit }: { value: number; min?:
   );
 }
 
+// パスの入力 / 出力とシェーダーの宣言のつながり。グラフが変わったとき、シェーダーをコンパイルし直したとき、
+// パイプラインが変わったときに読み直す
+function usePassLinkage(pass: string, revision: number) {
+  const [link, setLink] = useState<PassLinkage | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    const offs = [on('shader.status', bump), on('shader.reloaded', bump), on('pipeline.changed', bump)];
+    return () => offs.forEach((off) => off());
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    call('pass.linkage', { pass })
+      .then((l) => alive && setLink(l))
+      .catch(() => alive && setLink(null));
+    return () => {
+      alive = false;
+    };
+  }, [pass, revision, tick]);
+  return { link, refresh: () => setTick((t) => t + 1) };
+}
+
+// 入力 / 出力の行の下の 1 行: 届く先の変数か、ずれの警告
+function LinkLine({ link, output, onDeclare }: { link?: PassLinkRef; output: boolean; onDeclare: () => void }) {
+  if (!link || link.status === 'none') return null;
+  const where = link.target !== undefined ? `SV_Target${link.target}` : (link.register ?? '');
+  const file = link.var?.file ? `${link.var.file}:${link.var.line}` : '';
+  if (link.status === 'ok')
+    return (
+      <div className="link-line ok" title={file}>
+        → {where} {link.var?.name !== where ? link.var?.name : ''}
+      </div>
+    );
+  if (link.status === 'unused')
+    return (
+      <div className="link-line warn" title={file}>
+        ⚠ {where} {link.var?.name} を宣言していますが、シェーダーで使っていません
+      </div>
+    );
+  if (link.status === 'noSlot')
+    return <div className="link-line warn">⚠ bind がパイプラインのテーブルの外です (パイプラインに場所がありません)</div>;
+  return (
+    <div className="link-line warn">
+      ⚠ {where} の宣言がシェーダーにありません
+      <button onClick={onDeclare} title={output && link.target !== undefined ? 'PS の出力の構造体にメンバーを足す' : 'シェーダーに宣言を書き足す'}>
+        宣言を作る
+      </button>
+    </div>
+  );
+}
+
 // ============================================================
 //  パス
 // ============================================================
 export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) {
   const { status, apply } = useApply(`パス ${name}`);
   const [renameError, setRenameError] = useState('');
+  const { link, refresh } = usePassLinkage(name, graph.revision);
+  const [linkStatus, setLinkStatus] = useState('');
+  const [pick, setPick] = useState<Record<string, string>>({}); // つなぐ変数 → 選んだリソース
   const g = graph.graph;
   const pass = findPass(g, name);
   if (!pass) return <div className="placeholder">パス '{name}' はありません</div>;
@@ -107,8 +174,19 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
   const diags = graph.diagnostics.filter((d) => d.path.startsWith(`passes[${name}]`));
   const update = (patch: (p: JsonObject) => JsonObject, what: string) => void apply(withPass(g, name, patch), what);
 
+  const declare = (kind: 'input' | 'output', index: number) => {
+    setLinkStatus('');
+    call('pass.declare', { pass: name, kind, index })
+      .then((d) => {
+        setLinkStatus(`${d.file} の ${d.line} 行目に ${d.name} を書き足しました`);
+        refresh();
+      })
+      .catch((e) => setLinkStatus(`エラー: ${errorText(e)}`));
+  };
+
   const refRows = (key: 'inputs' | 'outputs') => {
     const refs = asArray(pass[key]).map(asObject);
+    const links = key === 'inputs' ? link?.inputs : link?.outputs;
     const setRef = (i: number, ref: JsonObject, what: string) =>
       update((p) => ({ ...p, [key]: refs.map((r, k) => (k === i ? ref : r)) }), what);
     const removeRef = (i: number) => update((p) => ({ ...p, [key]: refs.filter((_, k) => k !== i) }), `${key}[${i}] を削除`);
@@ -136,32 +214,35 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
           const bind = asObject(r.bind);
           const path = `${key}[${i}]`;
           return (
-            <div key={i} className="ref-row">
-              <Select value={String(r.res ?? '')} options={names} onChange={(v) => setRef(i, { ...r, res: v }, `${path}.res = ${v}`)} />
-              <Select
-                value={as}
-                options={key === 'inputs' ? INPUT_AS : OUTPUT_AS}
-                onChange={(v) => {
-                  const next: JsonObject = { ...r, as: v };
-                  if (NEEDS_BIND.has(v) && !r.bind) next.bind = { param: 0, offset: 0 };
-                  if (!NEEDS_BIND.has(v)) delete next.bind;
-                  setRef(i, next, `${path}.as = ${v}`);
-                }}
-              />
-              {key === 'outputs' && (
-                <Select value={String(r.load ?? 'load')} options={LOADS} onChange={(v) => setRef(i, { ...r, load: v }, `${path}.load = ${v}`)} />
-              )}
-              {NEEDS_BIND.has(as) && (
-                <span className="ref-bind" title="bind: ルートパラメーターの番号 / テーブルの中の位置">
-                  param
-                  <NumberBox value={Number(bind.param ?? 0)} min={0} onCommit={(v) => setRef(i, { ...r, bind: { ...bind, param: v } }, `${path}.bind.param = ${v}`)} />
-                  offset
-                  <NumberBox value={Number(bind.offset ?? 0)} min={0} onCommit={(v) => setRef(i, { ...r, bind: { ...bind, offset: v } }, `${path}.bind.offset = ${v}`)} />
-                </span>
-              )}
-              <button className="ref-remove" title="削除" onClick={() => removeRef(i)}>
-                ×
-              </button>
+            <div key={i} className="ref-row linked">
+              <div className="ref-fields">
+                <Select value={String(r.res ?? '')} options={names} onChange={(v) => setRef(i, { ...r, res: v }, `${path}.res = ${v}`)} />
+                <Select
+                  value={as}
+                  options={key === 'inputs' ? INPUT_AS : OUTPUT_AS}
+                  onChange={(v) => {
+                    const next: JsonObject = { ...r, as: v };
+                    if (NEEDS_BIND.has(v) && !r.bind) next.bind = { param: 0, offset: 0 };
+                    if (!NEEDS_BIND.has(v)) delete next.bind;
+                    setRef(i, next, `${path}.as = ${v}`);
+                  }}
+                />
+                {key === 'outputs' && (
+                  <Select value={String(r.load ?? 'load')} options={LOADS} onChange={(v) => setRef(i, { ...r, load: v }, `${path}.load = ${v}`)} />
+                )}
+                {NEEDS_BIND.has(as) && (
+                  <span className="ref-bind" title="bind: ルートパラメーターの番号 / テーブルの中の位置">
+                    param
+                    <NumberBox value={Number(bind.param ?? 0)} min={0} onCommit={(v) => setRef(i, { ...r, bind: { ...bind, param: v } }, `${path}.bind.param = ${v}`)} />
+                    offset
+                    <NumberBox value={Number(bind.offset ?? 0)} min={0} onCommit={(v) => setRef(i, { ...r, bind: { ...bind, offset: v } }, `${path}.bind.offset = ${v}`)} />
+                  </span>
+                )}
+                <button className="ref-remove" title="削除" onClick={() => removeRef(i)}>
+                  ×
+                </button>
+              </div>
+              <LinkLine link={links?.find((l) => l.index === i)} output={key === 'outputs'} onDeclare={() => declare(key === 'inputs' ? 'input' : 'output', i)} />
             </div>
           );
         })}
@@ -230,6 +311,63 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
       </div>
       {refRows('inputs')}
       {refRows('outputs')}
+      {link?.error && <div className="link-line warn">{link.error}</div>}
+      {linkStatus && <div className={`inspector-status ${linkStatus.startsWith('エラー') ? 'error' : 'ok'}`}>{linkStatus}</div>}
+      {link && ((link.unconnected?.length ?? 0) > 0 || (link.targets ?? []).some((t) => !t.connected)) && (
+        <div className="ref-table">
+          <div className="ref-head" title="シェーダーが宣言しているが、このパスのどの入力 / 出力もつないでいないもの">
+            <span>つながっていないシェーダーの変数</span>
+          </div>
+          {(link.unconnected ?? []).map((d) => {
+            const key = `${d.cls}${d.reg}/${d.space}`;
+            const res = pick[key] ?? '';
+            return (
+              <div key={key} className="ref-row">
+                <span className="link-var" title={d.file ? `${d.file}:${d.line}` : 'リフレクションで分かったもの'}>
+                  {d.type} <b>{d.name}</b> : {d.register}
+                  {!d.used && <span className="muted"> (未使用)</span>}
+                </span>
+                {d.cls === 't' && d.space === 0 ? (
+                  <>
+                    <select value={res} onChange={(e) => setPick({ ...pick, [key]: e.target.value })}>
+                      <option value="">リソースを選ぶ…</option>
+                      {names.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={!res}
+                      title="このリソースを読む入力を足し、パイプラインにこのレジスタを指す場所を作る"
+                      onClick={() => {
+                        setLinkStatus('');
+                        void connectShaderVar(g, name, res, d.reg, `パス ${name}: ${res} を ${d.name} (${d.register}) につなぐ`).then((err) =>
+                          setLinkStatus(err ? `エラー: ${err}` : `${res} を ${d.name} につなぎました`),
+                        );
+                      }}
+                    >
+                      つなぐ
+                    </button>
+                  </>
+                ) : (
+                  <span className="muted">(UAV / space 付きは手でつないでください)</span>
+                )}
+              </div>
+            );
+          })}
+          {(link.targets ?? [])
+            .filter((t) => !t.connected)
+            .map((t) => (
+              <div key={`sv${t.index}`} className="ref-row">
+                <span className="link-var">
+                  SV_Target{t.index} {t.name && <b>{t.name}</b>}
+                </span>
+                <span className="muted">どの出力 (RTV{t.index}) も書いていません</span>
+              </div>
+            ))}
+        </div>
+      )}
       <div className="ref-table">
         <div className="ref-head">
           <span>定数</span>

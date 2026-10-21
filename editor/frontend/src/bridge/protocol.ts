@@ -303,6 +303,39 @@ export interface EditState {
   redoCount: number;
 }
 
+// ---- パスの入力 / 出力とシェーダーの宣言のつながり (pass.linkage) ----
+export interface ShaderDeclInfo {
+  name: string;
+  type: string; // Texture2D / RWTexture2D<float4> …
+  cls: 't' | 'u' | 'b' | 's';
+  reg: number;
+  space: number;
+  register: string; // "t0" / "t1, space1"
+  used: boolean; // シェーダーが使っている (リフレクションにある)
+  file: string;
+  line: number;
+}
+// ok: つながっている / noDecl: 届く先の宣言がない / unused: 宣言しているが使っていない /
+// noSlot: bind がパイプラインのテーブルの外 / none: シェーダーの変数を使わない使い方 (DSV、Copy など)
+export type LinkStatus = 'ok' | 'noDecl' | 'unused' | 'noSlot' | 'none';
+export interface PassLinkRef {
+  index: number;
+  status: LinkStatus;
+  register?: string;
+  target?: number; // RTV の番号
+  var?: Partial<ShaderDeclInfo> & { name: string; line: number };
+}
+export interface PassLinkage {
+  pass: string;
+  pipeline?: string;
+  error?: string;
+  stages?: { stage: string; file: string }[];
+  inputs?: PassLinkRef[];
+  outputs?: PassLinkRef[];
+  unconnected?: ShaderDeclInfo[]; // どの入力 / 出力もつないでいない t / u の宣言
+  targets?: { index: number; name: string; line: number; connected: boolean }[];
+}
+
 // ---- リソースビューアー ----
 // シェーダー / パイプラインの編集 (asset.* / shader.*)
 export interface AssetTemplate {
@@ -394,9 +427,11 @@ export interface Methods {
   'project.saveAll': { params: Record<string, never>; result: { saved: string[] } };
   'app.closeAnswer': { params: { action: 'save' | 'discard' | 'cancel' }; result: { closing: boolean } };
   'pipeline.allocInput': {
-    params: { id: string; pass: string; param?: number; offset?: number; label?: string };
+    params: { id: string; pass: string; param?: number; offset?: number; register?: number; label?: string };
     result: { param: number; offset: number; changed: boolean };
   };
+  'pass.linkage': { params: { pass: string }; result: PassLinkage };
+  'pass.declare': { params: { pass: string; kind: 'input' | 'output'; index: number }; result: { file: string; name: string; line: number } };
   'graph.get': { params: Record<string, never>; result: GraphInfo };
   'graph.set': { params: { graph: JsonObject; label?: string }; result: GraphInfo };
   'edit.state': { params: Record<string, never>; result: EditState };
@@ -478,6 +513,7 @@ export interface Events {
   'unsaved.changed': Unsaved;
   'app.closeRequested': Unsaved;
   'shader.status': ShaderStatus;
+  'shader.reloaded': { path: string };
   'scene.changed': { revision: number; dirty: boolean };
   'scene.picked': { id: string };
   'library.changed': Record<string, never>;

@@ -6,7 +6,7 @@
 //    shader.compile   保存していない内容でもコンパイルだけして、メッセージとリフレクションを返す (描画は変えない)
 //    shader.usages    そのシェーダーを使うパイプラインとステージ
 //    shader.status    ホットリロード / 読み込みでコンパイルに失敗しているシェーダー
-//  イベント: shader.status (コンパイルの成否が変わった)
+//  イベント: shader.status (コンパイルの成否が変わった) / shader.reloaded (ホットリロードでコンパイルし直せた)
 //  保存 (asset.write) すると、描画スレッドのホットリロード (ShaderLibrary / PipelineLibrary の poll) が反映する。
 //  失敗したときは前のシェーダーのまま描く。
 // ============================================================
@@ -99,6 +99,7 @@ void EditorApp::onShaderStatus(const std::string& enginePath, bool ok, const std
 		return;
 	if (ok)
 	{
+		m_host.emit("shader.reloaded", { { "path", rel } });   // 宣言の対応 (pass.linkage) を読み直すきっかけ
 		if (m_shaderErrors.erase(rel) == 0)
 			return;
 	}

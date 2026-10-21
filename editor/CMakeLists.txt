@@ -41,6 +41,8 @@ add_library(studio_services STATIC
     src/services/MaterialMigration.cpp
     src/services/NodeParams.h         # 描画ノードのリソースの値 (詰め方、取り込んだ値、決まる順)
     src/services/NodeParams.cpp
+    src/services/PassLinkage.h        # パスの入力 / 出力とシェーダーの宣言のつながり
+    src/services/PassLinkage.cpp
     src/services/LightTypes.h         # ライトの種類 (定義、値の詰め方、hlsli の生成。M5-5)
     src/services/LightTypes.cpp
 )
@@ -62,6 +64,7 @@ add_executable(SunsetEditor
     src/app/EditorSave.cpp
     src/app/EditorLibrary.cpp
     src/app/EditorProjectFiles.cpp
+    src/app/EditorLinkage.cpp
     src/host/WebHost.h
     src/host/WebHost.cpp
     src/host/FileDialog.h

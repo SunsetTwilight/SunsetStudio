@@ -22,6 +22,7 @@
 //             window.devTools                                                  (UI が描くタイトルバー)
 //             asset.list / asset.read / asset.write / asset.templates / asset.create / asset.openExternal /
 //             shader.compile / shader.usages / shader.status                   (シェーダー / パイプラインの編集、M4)
+//             pass.linkage / pass.declare   (パスの入力 / 出力とシェーダーの宣言のつながり)
 //             light.types / project.migrateMaterials                             (M5-5 / マテリアルを外した移行)
 //             library.list / library.import / library.refresh / library.reimport / library.load
 //                                                                              (アセットのライブラリ、M5-3)
@@ -31,7 +32,7 @@
 //             pipeline.changed (元に戻す / やり直すでパイプラインが変わった) /
 //             viewer.pixel (リソースビューアーのピクセルの値と状態) /
 //             preview.changed (プレビューの一覧) / viewport.changed (ビューポートが別ウィンドウか) /
-//             shader.status (シェーダーのコンパイルの成否が変わった) /
+//             shader.status (シェーダーのコンパイルの成否が変わった) / shader.reloaded (コンパイルし直せた) /
 //             scene.changed (シーンの版と保存の状態) / scene.picked (ビューポートのクリックで選んだ物体) /
 //             library.changed (アセットの一覧かモデルの読み込みの状態が変わった) /
 //             window.state (最大化の状態が変わった)
@@ -109,6 +110,7 @@ private:
 	                   std::shared_ptr<const sunset::asset::Model> model, const sunset::asset::Diagnostics& diag, double ms);
 	// スロットの取り込んだ値 (基本色、金属度、粗さ、テクスチャ) で作る標準のマテリアル
 	void registerProjectFileMethods();   // EditorProjectFiles.cpp
+	void registerLinkageMethods();       // EditorLinkage.cpp (pass.linkage / pass.declare)
 	// 描画ノードのリソースの既定: モデルのスロットごとの取り込んだ値 (EditorLibrary.cpp)
 	std::vector<Json> importedSlotValues(const std::string& modelId, const sunset::asset::Model& model) const;
 	void requestTexture(const std::string& id);      // テクスチャを別のスレッドで読み、描画スレッドに渡す

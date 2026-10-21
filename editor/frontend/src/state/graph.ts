@@ -66,6 +66,27 @@ export async function applyInputGraph(next: JsonObject, passName: string, label:
   return err;
 }
 
+// シェーダーの変数 (t レジスタ reg) に、リソース res を読む入力をつなぐ。パイプラインにそのレジスタを指す場所を
+// 確保し (pipeline.allocInput の register)、返った bind で SRV の入力をパスに足す
+export async function connectShaderVar(graph: JsonObject, passName: string, res: string, reg: number, label: string): Promise<string | null> {
+  const pass = findPass(graph, passName);
+  const pipeline = String(pass?.pipeline ?? '');
+  if (!pass || !pipeline) return `パス ${passName} にパイプラインがありません`;
+  let r;
+  try {
+    r = await call('pipeline.allocInput', { id: pipeline, pass: passName, register: reg, label: `${pipeline} に t${reg} の場所を足す (${passName})` });
+  } catch (e) {
+    return errorText(e);
+  }
+  const next = withPass(graph, passName, (p) => ({
+    ...p,
+    inputs: [...asArray(p.inputs), { res, as: 'SRV', bind: { param: r.param, offset: r.offset } }],
+  }));
+  const err = await applyGraph(next, label);
+  if (err && r.changed) await call('edit.undo').catch(() => {});
+  return err;
+}
+
 export function asObject(v: JsonValue | undefined): JsonObject {
   return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
 }
