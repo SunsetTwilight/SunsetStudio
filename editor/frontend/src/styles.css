@@ -1484,3 +1484,12 @@ button.link:disabled {
   padding-left: 20px;
   color: var(--muted);
 }
+
+/* ノードエディターのヘッダー: 狭いときは題名を折り返さず、ボタンを次の行に回す */
+.node-editor .panel-header {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.node-editor .panel-title {
+  white-space: nowrap;
+}

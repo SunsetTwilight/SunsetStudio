@@ -149,16 +149,22 @@ function NodeEditor() {
       r.shaderErrors = shaderErrorsOf(n.data.pipeline, pipelineShaders, shaderErrors).map(fileName);
     }
     const selectedId = selection?.kind === 'pass' ? `pass:${selection.name}` : selection?.kind === 'resource' ? `res:${selection.name}` : '';
-    setNodes(
-      model.nodes.map((n) => ({
+    // 作り直しても、React Flow が測った大きさ (measured) を引き継ぐ。引き継がないと、大きさが変わらないノードは
+    // 測り直されず、「大きさの分からないノード」として隠れたままになる (ノードを足すと全部が消えて見えた)。
+    // 測る前のノード (新しく足したもの) は、見積もった高さで表示する
+    setNodes((prev) => {
+      const old = new Map(prev.map((n) => [n.id, n]));
+      return model.nodes.map((n) => ({
         id: n.id,
         type: n.data.kind === 'pass' ? 'pass' : 'resource',
         position: { x: positions[n.id]?.[0] ?? 0, y: positions[n.id]?.[1] ?? 0 },
         data: { ...n.data, runtime: rt.get(n.id) ?? { errors: [], warnings: [] } },
         selected: n.id === selectedId,
         width: n.width,
-      })),
-    );
+        initialHeight: n.height,
+        ...(old.get(n.id)?.measured ? { measured: old.get(n.id)!.measured } : {}),
+      }));
+    });
   }, [graph, model, positions, gpu, selection, pipelineShaders, shaderErrors]);
 
   useEffect(() => {
@@ -219,11 +225,11 @@ function NodeEditor() {
       if (n?.kind !== 'pass') return;
       const point = 'changedTouches' in e ? e.changedTouches[0] : e;
       const p = flow.screenToFlowPosition({ x: point.clientX, y: point.clientY });
-      const r = addOutput(graph.graph, n.name, [p.x, p.y - 20]);
+      const r = addOutput(withShownPositions(graph.graph), n.name, [p.x, p.y - 20]);
       if ('error' in r) return setStatus({ kind: 'error', text: r.error });
       void apply(r.graph, r.label).then((ok) => ok && studioStore.select({ kind: 'resource', name: r.resource }));
     },
-    [graph, apply, flow],
+    [graph, apply, flow, nodes],
   );
 
   const onConnect = useCallback(
@@ -323,6 +329,14 @@ function NodeEditor() {
 
   const ROLE_LABEL: Record<PreviewTarget['role'], string> = { resource: '', output: '出力', input: '入力' };
 
+  // 今表示しているノードの位置をグラフの editor.nodes に入れる。ノードを足す前に使う
+  // (位置を保存していないグラフに 1 つだけ位置を足すと、ほかのノードが自動配置で並び直して動いてしまう)
+  const withShownPositions = (g: JsonObject): JsonObject => {
+    const shown: Record<string, XY> = {};
+    for (const n of nodes) shown[n.id] = [n.position.x, n.position.y];
+    return withPositions(g, { ...shown, ...savedPositions(g) });
+  };
+
   const centerOfView = (): XY => {
     const rect = canvasRect();
     const p = flow.screenToFlowPosition({ x: (rect?.left ?? 0) + (rect?.width ?? 400) / 2, y: (rect?.top ?? 0) + (rect?.height ?? 300) / 2 });
@@ -333,7 +347,7 @@ function NodeEditor() {
     setMenu(null);
     if (!graph) return;
     const pipeline = graph.pipelines.find((p) => (kind === 'Compute' ? /compute|cs/i.test(p) : !/compute|cs/i.test(p))) ?? graph.pipelines[0] ?? '';
-    const r = addPass(graph.graph, kind, pipeline, at);
+    const r = addPass(withShownPositions(graph.graph), kind, pipeline, at);
     void apply(r.graph, `パス ${r.name} を追加`).then((ok) => ok && studioStore.select({ kind: 'pass', name: r.name }));
   };
   // 描画ノード: 既定の VS / PS / パイプラインをテンプレートから作り、メッシュを描くパス (layer = ノードの名前) を加える
@@ -348,7 +362,7 @@ function NodeEditor() {
       await call('asset.create', { template: 'shader.draw.ps', path: n.ps });
       const target = drawNodeTarget(graph.graph);
       await call('asset.create', { template: target.depth ? 'pipeline.draw' : 'pipeline.draw.nodepth', path: n.pipeline, shader: n.ps, vs: n.vs });
-      if (!(await apply(addDrawPass(graph.graph, n.name, n.pipeline, at), `描画ノード ${n.name} を追加`))) return;
+      if (!(await apply(addDrawPass(withShownPositions(graph.graph), n.name, n.pipeline, at), `描画ノード ${n.name} を追加`))) return;
       studioStore.select({ kind: 'pass', name: n.name });
       void loadPipelineShaders([...graph.pipelines, n.pipeline]);
       setStatus({
@@ -364,7 +378,7 @@ function NodeEditor() {
   const doAddResource = (kind: 'texture' | 'buffer', at: XY) => {
     setMenu(null);
     if (!graph) return;
-    const r = addResource(graph.graph, kind, at);
+    const r = addResource(withShownPositions(graph.graph), kind, at);
     void apply(r.graph, `リソース ${r.name} を追加`).then((ok) => ok && studioStore.select({ kind: 'resource', name: r.name }));
   };
 

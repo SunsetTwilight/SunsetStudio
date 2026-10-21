@@ -390,6 +390,7 @@ function uniqueName(base: string, taken: Set<string>): string {
 
 export type PassKind = 'Raster' | 'Compute' | 'Copy';
 
+// Raster のパスは、出力がないとコンパイルできないので、新しいテクスチャ (<名前>Out) を RTV0 で書く出力も作る (右に置く)
 export function addPass(graph: JsonObject, kind: PassKind, pipeline: string, at: XY): { graph: JsonObject; name: string } {
   const name = uniqueName(kind === 'Raster' ? 'Pass' : kind, new Set(passesOf(graph).map((p) => String(p.name))));
   const pass: JsonObject = { name, type: kind };
@@ -397,7 +398,12 @@ export function addPass(graph: JsonObject, kind: PassKind, pipeline: string, at:
   if (kind === 'Raster') pass.content = { fullscreen: true };
   if (kind === 'Compute') pass.content = { dispatch: [1, 1, 1] };
   const positions = { ...savedPositions(graph), [passId(name)]: at };
-  return { graph: withPositions(setPasses(graph, [...passesOf(graph), pass]), positions), name };
+  let g = withPositions(setPasses(graph, [...passesOf(graph), pass]), positions);
+  if (kind === 'Raster') {
+    const r = addOutput(g, name, [at[0] + PASS_WIDTH + 60, at[1]]);
+    if (!('error' in r)) g = r.graph;
+  }
+  return { graph: g, name };
 }
 
 // ---- 描画ノード (メッシュを描く drawList のパス) ----

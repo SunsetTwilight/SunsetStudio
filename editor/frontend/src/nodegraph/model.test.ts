@@ -142,6 +142,10 @@ describe('削除と追加', () => {
     expect([a.name, b.name]).toEqual(['Pass', 'Pass2']);
     expect(pass(b.graph, 'Pass')).toMatchObject({ type: 'Raster', pipeline: 'pipelines/composite.json', content: { fullscreen: true } });
     expect(savedPositions(b.graph)['pass:Pass2']).toEqual([7, 8]);
+    // Raster のパスは出力がないとコンパイルできないので、新しいテクスチャを RTV0 で書く
+    expect(refs(b.graph, 'Pass2', 'outputs')).toEqual([{ res: 'Pass2Out', as: 'RTV0', load: 'clear' }]);
+    expect(asObject(b.graph.resources).Pass2Out).toEqual({ format: 'R8G8B8A8_Unorm', size: { relative: 1 } });
+    expect(savedPositions(b.graph)['res:Pass2Out'][1]).toBe(8);
     const c = addPass(graph, 'Copy', 'x', [0, 0]);
     expect(pass(c.graph, 'Copy').pipeline).toBeUndefined();
     const t = addResource(graph, 'buffer', [0, 0]);
