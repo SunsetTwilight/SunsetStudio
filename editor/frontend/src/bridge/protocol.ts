@@ -393,7 +393,10 @@ export interface Methods {
   'project.unsaved': { params: Record<string, never>; result: Unsaved };
   'project.saveAll': { params: Record<string, never>; result: { saved: string[] } };
   'app.closeAnswer': { params: { action: 'save' | 'discard' | 'cancel' }; result: { closing: boolean } };
-  'pipeline.growTable': { params: { id: string; param: number; size: number; label?: string }; result: { grown: boolean; size: number } };
+  'pipeline.allocInput': {
+    params: { id: string; pass: string; param?: number; offset?: number; label?: string };
+    result: { param: number; offset: number; changed: boolean };
+  };
   'graph.get': { params: Record<string, never>; result: GraphInfo };
   'graph.set': { params: { graph: JsonObject; label?: string }; result: GraphInfo };
   'edit.state': { params: Record<string, never>; result: EditState };

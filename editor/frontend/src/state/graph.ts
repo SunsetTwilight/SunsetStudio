@@ -2,7 +2,7 @@
 //  ビューポートのレンダーグラフの読み込みと編集
 //
 //    loadGraph()        graph.get の結果をストアに入れる (起動時と graph.changed のとき)
-//    applyInputGraph()  入力を加えたグラフを送る。bind がパイプラインのテーブルの範囲外なら、先にテーブルを広げる
+//    applyInputGraph()  入力を加えたグラフを送る。先にパイプラインのテーブルに入力の空きを確保する (なければ足す)
 //    applyGraph(json)   グラフ全体の JSON を graph.set で送る。コンパイルできなければエラーで、
 //                       エディター側は前のグラフのまま (ストアも変えない)
 //  グラフの JSON の形はエンジンの graphToJson と同じ (resources はオブジェクト、passes は配列)。
@@ -29,26 +29,41 @@ export async function applyGraph(next: JsonObject, label?: string): Promise<stri
   }
 }
 
-// パス passName の入力 inputIndex を加えたグラフ next を送る。その入力の bind (SRV) が、パスのパイプラインの
-// 記述子テーブルより先なら、先に pipeline.growTable でテーブルを広げる (履歴は「広げる」と「グラフ」の 2 つになる)
+// パス passName の最後の入力を加えたグラフ next を送る。SRV の入力なら、先に pipeline.allocInput でパイプラインの
+// 記述子テーブルに空きを確保し (広げる / なければテーブルを足す)、返った param / offset をその入力の bind にする
+// (履歴は「パイプライン」と「グラフ」の 2 つになる。シェーダーで使うには Texture2D の宣言が要る)
 export async function applyInputGraph(next: JsonObject, passName: string, label: string): Promise<string | null> {
   const pass = findPass(next, passName);
   const inputs = asArray(pass?.inputs).map(asObject);
-  const bind = asObject(inputs[inputs.length - 1]?.bind);
+  const last = inputs[inputs.length - 1];
   const pipeline = String(pass?.pipeline ?? '');
-  if (pipeline && typeof bind.param === 'number') {
+  let graph = next;
+  let allocated = false;
+  if (pipeline && last && last.as === 'SRV') {
+    const bind = asObject(last.bind);
     try {
-      await call('pipeline.growTable', {
+      const r = await call('pipeline.allocInput', {
         id: pipeline,
-        param: bind.param,
-        size: Number(bind.offset ?? 0) + 1,
-        label: `${pipeline} のテーブルを広げる (${passName} の入力)`,
+        pass: passName,
+        param: typeof bind.param === 'number' ? bind.param : -1,
+        offset: Number(bind.offset ?? 0),
+        label: `${pipeline} に入力の場所を足す (${passName})`,
       });
+      allocated = r.changed;
+      if (r.param !== bind.param || r.offset !== Number(bind.offset ?? 0))
+        graph = withPass(next, passName, (p) => {
+          const ins = asArray(p.inputs).map(asObject);
+          ins[ins.length - 1] = { ...ins[ins.length - 1], bind: { param: r.param, offset: r.offset } };
+          return { ...p, inputs: ins };
+        });
     } catch (e) {
       return errorText(e);
     }
   }
-  return applyGraph(next, label);
+  const err = await applyGraph(graph, label);
+  // グラフが通らなければ、確保したパイプラインの変更も戻す (履歴に残さない)
+  if (err && allocated) await call('edit.undo').catch(() => {});
+  return err;
 }
 
 export function asObject(v: JsonValue | undefined): JsonObject {

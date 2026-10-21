@@ -265,13 +265,15 @@ describe('出力 / 入力の追加', () => {
     expect(refs(u.graph, c.name, 'outputs').at(-1)).toMatchObject({ as: 'UAV', bind: { param: 0, offset: 0 } });
   });
 
-  it('入力は書いていないテクスチャを、まだ読んでいないものから選び、次の bind で読む', () => {
+  it('入力は前のパスが書いたテクスチャを、まだ読んでいないものから選び、次の bind で読む', () => {
     const r = addInput(graph, 'Composite');
     if ('error' in r) throw new Error(r.error);
     expect(refs(r.graph, 'Composite', 'inputs')[1]).toEqual({ res: 'gbAlbedo', as: 'SRV', bind: { param: 1, offset: 1 } });
-    // GBuffer は gbAlbedo / gbNormal / depth を書いているので、sceneColor を読む
-    const g = addInput(graph, 'GBuffer');
-    if ('error' in g) throw new Error(g.error);
-    expect(refs(g.graph, 'GBuffer', 'inputs')[0].res).toBe('sceneColor');
+    // Lighting は gbAlbedo / gbNormal / depth をもう読んでいるので、読んでいないものがなければ最初のもの
+    const l = addInput(graph, 'Lighting');
+    if ('error' in l) throw new Error(l.error);
+    expect(refs(l.graph, 'Lighting', 'inputs')[3].res).toBe('gbAlbedo');
+    // GBuffer より前に書くパスはない (後の Lighting が書く sceneColor は選ばない)
+    expect(addInput(graph, 'GBuffer')).toMatchObject({ error: expect.stringMatching(/前のパス/) });
   });
 });

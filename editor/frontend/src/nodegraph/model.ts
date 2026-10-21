@@ -500,16 +500,26 @@ export function addOutput(graph: JsonObject, passName: string, at?: XY): { graph
   return { graph: g, label: `${passName} の出力に ${name} (${as}) を追加`, resource: name };
 }
 
-// パスに入力を加える。そのパスが書いていないテクスチャを選び、SRV で読む (bind は今ある bind の次)。Copy のパスは CopySrc
+// パスに入力を加える。このパスより前のパスが書いたテクスチャ (このパスが書くものは除く) を、まだ読んでいないものから選び、
+// SRV で読む (bind は今ある bind の次。パイプラインに空きがなければ applyInputGraph が確保する)。Copy のパスは CopySrc。
+// 後のパスが書くテクスチャを選ぶと「書く前に読む」になってコンパイルできないので選ばない
 export function addInput(graph: JsonObject, passName: string): { graph: JsonObject; label: string } | { error: string } {
-  const pass = passesOf(graph).find((p) => p.name === passName);
+  const passes = passesOf(graph);
+  const index = passes.findIndex((p) => p.name === passName);
+  const pass = passes[index];
   if (!pass) return { error: `パス ${passName} はありません` };
   const written = new Set(asArray(pass.outputs).map((v) => String(asObject(v).res ?? '')));
   const read = new Set(asArray(pass.inputs).map((v) => String(asObject(v).res ?? '')));
   const resources = asObject(graph.resources);
-  const textures = Object.keys(resources).filter((n) => String(asObject(resources[n]).kind ?? 'texture') === 'texture' && !written.has(n));
-  const res = textures.find((n) => !read.has(n)) ?? textures[0];
-  if (!res) return { error: `${passName} が読めるテクスチャがありません (書いているものは読めません)` };
+  const isTexture = (n: string) => resources[n] !== undefined && String(asObject(resources[n]).kind ?? 'texture') === 'texture';
+  const before: string[] = [];
+  for (const p of passes.slice(0, index))
+    for (const o of asArray(p.outputs)) {
+      const n = String(asObject(o).res ?? '');
+      if (isTexture(n) && !written.has(n) && !before.includes(n)) before.push(n);
+    }
+  const res = before.find((n) => !read.has(n)) ?? before[0];
+  if (!res) return { error: `${passName} より前のパスが書いたテクスチャがありません (読めるのは、前のパスが書いたものだけです)` };
   const as = pass.type === 'Copy' ? 'CopySrc' : 'SRV';
   const ref: JsonObject = { res, as };
   if (as === 'SRV') ref.bind = nextBind(pass);

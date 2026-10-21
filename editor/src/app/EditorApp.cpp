@@ -9,6 +9,8 @@
 
 #include <fstream>
 #include <process.h>   // _getpid
+#include <map>
+#include <set>
 #include <sstream>
 
 #include <algorithm>
@@ -205,47 +207,113 @@ EditOutcome applyPipelineAssetEdit(ViewportRenderer& scene, const std::string& i
 	return o;
 }
 
-// 記述子テーブル (root パラメーター param) を size 個まで広げる。最後のレンジの数を増やす。
-// 広げる必要がなければ grown = false で ok
-EditOutcome growDescriptorTable(ViewportRenderer& scene, const std::string& id, uint32_t param, uint32_t size, bool& grown)
+// パス passName に入力 (SRV) を 1 つ加えるための、パイプラインの記述子テーブルの空きを確保する。
+//   ・want の param が、パスがつないでいる SRV のテーブルなら、want の offset まで広げて使う
+//   ・そうでなければ、パスがつないでいる SRV のテーブルの、今の入力の次の位置を使う (広げる)
+//   ・それもなければ、新しい SRV のテーブル (空いている t レジスタ、数 1) をパイプラインに足す
+// 物体ごとのリソースのテーブル (グラフがつないでいないもの) は使わない。変えたら changed = true (履歴に入れる)
+EditOutcome allocInputSlot(ViewportRenderer& scene, const std::string& id, const std::string& passName, int32_t wantParam,
+                           uint32_t wantOffset, uint32_t& outParam, uint32_t& outOffset, bool& changed)
 {
 	EditOutcome o;
-	grown = false;
+	changed = false;
 	const gfx::rg::PipelineAsset* current = scene.pipelines().asset(id);
 	if (!current)
-	{
-		o.message = "パイプラインのアセット '" + id + "' を読めません";
-		return o;
-	}
+		return o.message = "パイプラインのアセット '" + id + "' を読めません", o;
 	gfx::rg::PipelineAsset next = *current;
 	GfxBindingLayoutDesc&  l    = next.layout;
-	if (param >= l.numParameters || l.parameters[param].parameterType != GfxRootParameterType::DescriptorTable)
+
+	// パスがつないでいるルートパラメーターと、param ごとの入力の最後の offset
+	std::set<uint32_t>              graphBound;
+	std::map<uint32_t, uint32_t>    nextOffset;
+	for (const auto& p : scene.graph().desc().passes)
+		if (p.name == passName)
+		{
+			for (const auto& c : p.constants) if (c.bind.valid()) graphBound.insert(static_cast<uint32_t>(c.bind.param));
+			for (const auto* refs : { &p.inputs, &p.outputs })
+				for (const auto& r : *refs)
+					if (r.bind.valid())
+					{
+						const uint32_t prm = static_cast<uint32_t>(r.bind.param);
+						graphBound.insert(prm);
+						nextOffset[prm] = std::max(nextOffset[prm], r.bind.offset + 1);
+					}
+		}
+	auto isSrvTable = [&](uint32_t prm) {
+		if (prm >= l.numParameters) return false;
+		const GfxRootParameter& rp = l.parameters[prm];
+		if (rp.parameterType != GfxRootParameterType::DescriptorTable || rp.numRanges == 0 || rp.firstRange + rp.numRanges > l.numRanges)
+			return false;
+		for (uint32_t i = rp.firstRange; i < rp.firstRange + rp.numRanges; ++i)
+			if (l.ranges[i].rangeType != GfxDescriptorRangeType::SRV)
+				return false;
+		return true;
+	};
+
+	if (wantParam >= 0 && graphBound.count(static_cast<uint32_t>(wantParam)) && isSrvTable(static_cast<uint32_t>(wantParam)))
 	{
-		o.message = "param " + std::to_string(param) + " は記述子テーブルではありません (" + id + ")";
-		return o;
+		outParam  = static_cast<uint32_t>(wantParam);
+		outOffset = wantOffset;
 	}
-	const GfxRootParameter& rp = l.parameters[param];
-	if (rp.numRanges == 0 || rp.firstRange + rp.numRanges > l.numRanges)
+	else
 	{
-		o.message = "param " + std::to_string(param) + " のテーブルにレンジがありません (" + id + ")";
-		return o;
+		bool found = false;
+		for (uint32_t prm : graphBound)
+			if (isSrvTable(prm))
+			{
+				outParam  = prm;
+				outOffset = nextOffset[prm];
+				found = true;
+				break;
+			}
+		if (!found)
+		{
+			// 新しいテーブル: t レジスタは、今あるどの SRV (テーブルとルート) とも重ならない番号
+			if (l.numParameters >= GFX_MAX_ROOT_PARAMETERS || l.numRanges >= GFX_MAX_DESCRIPTOR_RANGES)
+				return o.message = "パイプライン '" + id + "' にルートパラメーターを足せません (数の上限)", o;
+			uint32_t reg = 0;
+			for (uint32_t i = 0; i < l.numRanges; ++i)
+				if (l.ranges[i].rangeType == GfxDescriptorRangeType::SRV && l.ranges[i].registerSpace == 0 && l.ranges[i].numDescriptors != 0xFFFFFFFFu)
+					reg = std::max(reg, l.ranges[i].baseShaderRegister + l.ranges[i].numDescriptors);
+			for (uint32_t i = 0; i < l.numParameters; ++i)
+				if (l.parameters[i].parameterType == GfxRootParameterType::SRV && l.parameters[i].registerSpace == 0)
+					reg = std::max(reg, l.parameters[i].shaderRegister + 1);
+			GfxDescriptorRange& dr = l.ranges[l.numRanges];
+			dr = {};
+			dr.rangeType          = GfxDescriptorRangeType::SRV;
+			dr.numDescriptors     = 0;   // 下で offset + 1 まで広げる
+			dr.baseShaderRegister = reg;
+			dr.flags              = GfxDescriptorRangeFlags::DescriptorsVolatile;
+			GfxRootParameter& rp = l.parameters[l.numParameters];
+			rp = {};
+			rp.parameterType    = GfxRootParameterType::DescriptorTable;
+			rp.shaderVisibility = GfxShaderVisibility::All;
+			rp.firstRange       = l.numRanges;
+			rp.numRanges        = 1;
+			outParam  = l.numParameters;
+			outOffset = 0;
+			++l.numRanges;
+			++l.numParameters;
+			changed = true;
+		}
 	}
+
+	// offset + 1 個まで広げる (最後のレンジを増やす。上限なしなら広げなくてよい)
+	const GfxRootParameter& rp = l.parameters[outParam];
 	uint64_t total = 0;
+	bool unbounded = false;
 	for (uint32_t i = rp.firstRange; i < rp.firstRange + rp.numRanges; ++i)
 	{
-		if (l.ranges[i].numDescriptors == 0xFFFFFFFFu)
-			return o.ok = true, o;   // 上限なし: 広げなくてよい
-		total += l.ranges[i].numDescriptors;
+		if (l.ranges[i].numDescriptors == 0xFFFFFFFFu) unbounded = true;
+		else total += l.ranges[i].numDescriptors;
 	}
-	if (total >= size)
-		return o.ok = true, o;
-	GfxDescriptorRange& last = l.ranges[rp.firstRange + rp.numRanges - 1];
-	if (last.rangeType == GfxDescriptorRangeType::Sampler)
+	if (!unbounded && total < static_cast<uint64_t>(outOffset) + 1)
 	{
-		o.message = "param " + std::to_string(param) + " は Sampler のテーブルです (" + id + ")";
-		return o;
+		l.ranges[rp.firstRange + rp.numRanges - 1].numDescriptors += static_cast<uint32_t>(outOffset + 1 - total);
+		changed = true;
 	}
-	last.numDescriptors += static_cast<uint32_t>(size - total);
+	if (!changed)
+		return o.ok = true, o;
 	o.before = pipelineAssetJson(*current);
 	if (!scene.pipelines().set(id, next))
 	{
@@ -255,7 +323,6 @@ EditOutcome growDescriptorTable(ViewportRenderer& scene, const std::string& id, 
 	}
 	o.after = pipelineAssetJson(*scene.pipelines().asset(id));
 	o.ok    = true;
-	grown   = true;
 	return o;
 }
 
@@ -657,27 +724,29 @@ void EditorApp::registerMethods()
 		});
 	});
 
-	// 記述子テーブルを size 個まで広げる (パスに入力を加えて、bind がテーブルの範囲外になるとき)。
-	// 広げたら履歴に入れる。result: { grown, size }
-	b.registerMethod("pipeline.growTable", [this, noScene](const Json& p, Bridge::Reply r) {
-		const std::string id    = p.at("id").get<std::string>();
-		const uint32_t    param = p.at("param").get<uint32_t>();
-		const uint32_t    size  = p.at("size").get<uint32_t>();
-		const std::string label = p.value("label", id + " のテーブルを広げる");
-		m_render.postScene([this, r, id, param, size, label, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+	// パスに入力 (SRV) を加える前に、パイプラインの記述子テーブルの空きを確保する (なければテーブルを足す)。
+	// 変えたら履歴に入れる。result: { param, offset, changed } (新しい入力の bind に使う)
+	b.registerMethod("pipeline.allocInput", [this, noScene](const Json& p, Bridge::Reply r) {
+		const std::string id     = p.at("id").get<std::string>();
+		const std::string pass   = p.at("pass").get<std::string>();
+		const int32_t     param  = p.value("param", -1);
+		const uint32_t    offset = p.value("offset", 0u);
+		const std::string label  = p.value("label", id + " に入力の場所を足す");
+		m_render.postScene([this, r, id, pass, param, offset, label, noScene](GraphicsEngine&, ViewportRenderer* scene) {
 			if (!scene)
 				return noScene(r);
-			bool grown = false;
-			EditOutcome o = growDescriptorTable(*scene, id, param, size, grown);
+			uint32_t outParam = 0, outOffset = 0;
+			bool changed = false;
+			EditOutcome o = allocInputSlot(*scene, id, pass, param, offset, outParam, outOffset, changed);
 			if (!o.ok)
 				return r.error(o.code, o.message);
-			if (grown)
+			if (changed)
 			{
 				recordEdit({ label, "pipelineAsset", id, std::move(o.before), std::move(o.after) });
 				m_host.emit("pipeline.changed", { { "id", id } });
-				log("info", "inspector", id + ": param " + std::to_string(param) + " のテーブルを " + std::to_string(size) + " 個に広げました");
+				log("info", "inspector", id + ": 入力の場所 (param " + std::to_string(outParam) + " の " + std::to_string(outOffset) + " 番目) を確保しました");
 			}
-			r.ok({ { "grown", grown }, { "size", size } });
+			r.ok({ { "param", outParam }, { "offset", outOffset }, { "changed", changed } });
 		});
 	});
 
