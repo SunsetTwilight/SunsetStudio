@@ -1473,3 +1473,45 @@ button.link:disabled {
 .node-editor .panel-title {
   white-space: nowrap;
 }
+
+/* ---- 描画ノードのリソース (物体ごとの定数とテクスチャ) ---- */
+.node-resources {
+  margin: 2px 0 6px;
+}
+.node-resources-title {
+  padding: 4px 8px 2px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.node-resources-title .muted {
+  font-weight: normal;
+  margin-left: 6px;
+}
+.node-resource-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.node-resource-value select {
+  flex: 1;
+  min-width: 0;
+}
+.node-resource-numbers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.node-resource-numbers input.number {
+  width: 58px;
+}
+.node-resource-numbers.faint input,
+input.faint {
+  opacity: 0.6;
+}
+.node-resource-value button.reset {
+  flex: none;
+  width: 22px;
+  padding: 0;
+}

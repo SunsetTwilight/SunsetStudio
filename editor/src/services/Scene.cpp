@@ -95,6 +95,10 @@ Json sceneToJson(const SceneDesc& s)
 			j["layers"] = *o.layers;
 		if (!o.slotLayers.empty())
 			j["slotLayers"] = o.slotLayers;
+		if (!o.nodeParams.empty())
+			j["nodeParams"] = o.nodeParams;
+		if (!o.slotNodeParams.empty())
+			j["slotNodeParams"] = o.slotNodeParams;
 		objects.push_back(std::move(j));
 	}
 	Json j = { { "version", s.version }, { "objects", objects } };
@@ -233,6 +237,36 @@ bool sceneFromJson(const Json& json, SceneDesc& out, SceneDiagnostics& diag)
 						else
 							for (const auto& [slot, a] : x.items())
 								names(a, at + ".slotLayers." + slot, o.slotLayers[slot]);
+					}
+					else if (k == "nodeParams" || k == "slotNodeParams")
+					{
+						// { layer: { 変数: 値 } }。値は数 / 数の配列 / 真偽値 / 文字列 ("asset:<ID>") / null
+						auto values = [&](const Json& v, const std::string& where) -> bool {
+							if (!v.is_object()) { diag.errors.push_back(where + ": オブジェクト ({ 変数: 値 }) が必要です"); return false; }
+							for (const auto& [name, val] : v.items())
+							{
+								bool ok = val.is_null() || val.is_number() || val.is_boolean() || val.is_string();
+								if (val.is_array())
+								{
+									ok = true;
+									for (const Json& e : val) ok = ok && (e.is_number() || e.is_boolean());
+								}
+								if (!ok) { diag.errors.push_back(where + "." + name + ": 数 / 数の配列 / 真偽値 / \"asset:<ID>\" が必要です"); return false; }
+							}
+							return true;
+						};
+						if (!x.is_object()) { diag.errors.push_back(at + "." + k + ": オブジェクトが必要です"); continue; }
+						for (const auto& [a, pv] : x.items())
+						{
+							if (k == "nodeParams")
+							{
+								if (values(pv, at + ".nodeParams." + a)) o.nodeParams[a] = pv;
+								continue;
+							}
+							if (!pv.is_object()) { diag.errors.push_back(at + ".slotNodeParams." + a + ": { layer: { 変数: 値 } } が必要です"); continue; }
+							for (const auto& [layer, lv] : pv.items())
+								if (values(lv, at + ".slotNodeParams." + a + "." + layer)) o.slotNodeParams[a][layer] = lv;
+						}
 					}
 					else if (k == "layer") {}   // M5-2 の仮の項目 (M5-4 でマテリアルパスに置き換えた)。読み飛ばす
 					else diag.warnings.push_back(at + "." + k + ": 知らないキーなので無視します");
@@ -585,5 +619,21 @@ int pickObject(const SceneDesc& scene, const std::vector<Matrix>& world, const s
 		}
 	}
 	return best;
+}
+const Json& objectNodeParams(const SceneObject& o, const std::string& layer)
+{
+	static const Json none;
+	const auto it = o.nodeParams.find(layer);
+	return it != o.nodeParams.end() ? it->second : none;
+}
+
+const Json& slotNodeParams(const SceneObject& o, const std::string& slot, const std::string& layer)
+{
+	static const Json none;
+	const auto s = o.slotNodeParams.find(slot);
+	if (s == o.slotNodeParams.end())
+		return none;
+	const auto it = s->second.find(layer);
+	return it != s->second.end() ? it->second : none;
 }
 } // namespace studio

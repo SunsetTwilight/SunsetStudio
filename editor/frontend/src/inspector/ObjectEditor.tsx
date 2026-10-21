@@ -3,7 +3,8 @@
 //
 //  名前、モデル (立方体か、ライブラリのモデル、M5-3)、親、位置 / 回転 (度。X → Y → Z の順) / 大きさ、表示、
 //  ライトの物体 (M5-5) はモデル / 色の代わりにライトの欄 (LightEditor)。
-//  描画レイヤー (どの描画ノードで描くか。物体と、スロットごとの上書き。DrawLayerEditor)、色 (シェーダーの gColor)。
+//  描画レイヤー (どの描画ノードで描くか。物体と、スロットごとの上書き。DrawLayerEditor)、色 (シェーダーの gColor)、
+//  描画ノードのリソース (そのノードのシェーダーが使う定数とテクスチャを物体 / スロットごとに。NodeResourceEditor)。
 //  マテリアル (M5-4) の欄は 2026-10-22 に外した。
 //  変えるとシーン全体の JSON を scene.set で送る (元に戻す / やり直すが効く。保存はシーンのパネル)。
 // ============================================================
@@ -14,6 +15,7 @@ import { applyScene, fromHex, parentCandidates, toHex, updateObject } from '../s
 import { useStudio } from '../state/store';
 import { NameBox, NumberBox } from './GraphEditors';
 import { DrawLayerEditor } from './DrawLayerEditor';
+import { NodeResourceEditor } from './NodeResourceEditor';
 import { LightEditor } from './LightEditor';
 
 type Vec3 = [number, number, number];
@@ -134,6 +136,7 @@ export function ObjectEditor({ scene, id }: { scene: SceneJson; id: string }) {
         </span>
       </div>
       <DrawLayerEditor scene={scene} obj={obj} slots={slots} apply={applyWhole} />
+      <NodeResourceEditor scene={scene} obj={obj} slots={slots} apply={applyWhole} />
         </>
       )}
     </div>

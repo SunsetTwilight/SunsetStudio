@@ -13,6 +13,7 @@
 //  シーンが "asset:<ID>" のモデルを使うと、まだ読んでいなければ読む (requestSceneModels)。
 // ============================================================
 #include "EditorApp.h"
+#include "services/NodeParams.h"
 
 #include "host/FileDialog.h"
 
@@ -26,6 +27,9 @@ namespace sa = sunset::asset;
 
 namespace
 {
+// 半透明 (Blend) のスロットの取り込んだ値で、描かないアルファの境目 (ディファードでは混ぜられないので、ほぼ透明なところだけ捨てる)
+constexpr float k_BlendAlphaCutoff = 0.01f;
+
 Json modelInfo(const sa::Model& m)
 {
 	size_t vertices = 0, triangles = 0, morphs = 0;
@@ -48,6 +52,7 @@ void EditorApp::openLibrary()
 {
 	++m_libraryGeneration;
 	m_modelStates.clear();
+	m_textureStates.clear();
 	m_library.close();
 	if (m_project)
 	{
@@ -135,15 +140,81 @@ void EditorApp::onModelLoaded(uint64_t generation, const std::string& id, uint64
 		st.status = "ready";
 		st.error.clear();
 		st.info   = modelInfo(*model);
+		st.imported = importedSlotValues(id, *model);
 		st.info["loadMs"] = std::round(ms * 10) / 10;
 		const sa::AssetRecord* rec = m_library.find(id);
 		log("info", "library", "モデルを読みました: " + (rec ? rec->path : id) + " (" + std::to_string(st.info["triangles"].get<size_t>()) +
 		                       " 三角形、" + std::to_string(static_cast<int>(ms)) + " ms)");
 	}
-	m_render.postScene([id, model](GraphicsEngine& engine, ViewportRenderer* scene) {
-		if (scene) scene->setModel(engine, id, model.get());
+	m_render.postScene([id, model, imported = st.imported](GraphicsEngine& engine, ViewportRenderer* scene) {
+		if (scene) scene->setModel(engine, id, model.get(), imported);
 	});
 	m_host.emit("library.changed", Json::object());
+}
+
+std::vector<Json> EditorApp::importedSlotValues(const std::string& modelId, const sa::Model& model) const
+{
+	std::vector<Json> out;
+	const sa::AssetRecord* rec = m_library.find(modelId);
+	for (const sa::MaterialSlot& slot : model.slots)
+	{
+		ImportedSlot s;
+		s.baseColor = slot.baseColor;
+		s.metallic  = slot.metallic;
+		s.roughness = slot.roughness;
+		if (slot.alphaMode == sa::AlphaMode::Mask)
+			s.alphaCutoff = slot.alphaCutoff;
+		else if (slot.alphaMode == sa::AlphaMode::Blend)
+			s.alphaCutoff = k_BlendAlphaCutoff;
+		// 参照しているテクスチャが取り込まれていれば使う
+		auto tex = [&](const sa::TextureRef& ref) -> std::string {
+			if (!rec || !ref.used())
+				return {};
+			const sa::AssetRecord* t = m_library.findReferenced(*rec, ref.path);
+			return t && t->meta.importer == "texture" ? t->id.toString() : std::string();
+		};
+		s.baseColorTexture         = tex(slot.baseColorTexture);
+		s.normalTexture            = tex(slot.normalTexture);
+		s.metallicRoughnessTexture = tex(slot.metallicRoughnessTexture);
+		out.push_back(importedValues(s));
+	}
+	return out;
+}
+
+void EditorApp::requestTexture(const std::string& id)
+{
+	TextureState& st = m_textureStates[id];
+	const uint64_t ticket = ++st.ticket;
+	const sa::AssetRecord* rec = m_library.find(id);
+	if (!rec || rec->missing || rec->meta.importer != "texture")
+	{
+		st.status = "error";
+		log("warning", "library", "テクスチャ " + id + ": " + (!rec ? std::string("アセットがありません") : rec->missing ? "元のファイルがありません: " + rec->path
+		                                                                                                    : "テクスチャではありません: " + rec->path));
+		m_render.postScene([id](GraphicsEngine& engine, ViewportRenderer* scene) {
+			if (scene) scene->nodeResources().setTexture(engine, id, nullptr);
+		});
+		return;
+	}
+	st.status = "loading";
+	const uint64_t generation = m_libraryGeneration;
+	m_libraryWorker.post([this, rec = *rec, cache = m_library.cacheDir(), generation, id, ticket] {
+		sa::Diagnostics diag;
+		std::shared_ptr<const sa::Texture> texture = m_library.loadTexture(rec, cache, diag);
+		m_host.post([this, generation, id, ticket, texture, diag] {
+			if (generation != m_libraryGeneration)
+				return;
+			auto it = m_textureStates.find(id);
+			if (it == m_textureStates.end() || it->second.ticket != ticket)
+				return;
+			it->second.status = texture ? "ready" : "error";
+			for (const auto& w : diag.warnings) log("warning", "library", w);
+			for (const auto& e : diag.errors)   log("error", "library", "テクスチャを読めません: " + e);
+			m_render.postScene([id, texture](GraphicsEngine& engine, ViewportRenderer* scene) {
+				if (scene) scene->nodeResources().setTexture(engine, id, texture);
+			});
+		});
+	});
 }
 
 void EditorApp::registerLibraryMethods()
@@ -204,6 +275,16 @@ void EditorApp::registerLibraryMethods()
 		}
 		for (const auto& id : reload)
 			requestModel(id);
+		// 読んだことのあるテクスチャで、元のファイル / 設定が変わったもの
+		std::vector<std::string> reloadTextures;
+		for (const auto& [id, st] : m_textureStates)
+		{
+			const sa::AssetRecord* rec = m_library.find(id);
+			if (st.status != "loading" && rec && !rec->missing && !m_library.database().upToDate(*rec, m_library.cacheDir()))
+				reloadTextures.push_back(id);
+		}
+		for (const auto& id : reloadTextures)
+			requestTexture(id);
 		m_host.emit("library.changed", Json::object());
 		r.ok({ { "created", scan.created }, { "reIded", scan.reIded }, { "reloaded", reload } });
 	});
@@ -231,6 +312,8 @@ void EditorApp::registerLibraryMethods()
 		std::filesystem::remove(sa::AssetDatabase::artifactPath(m_library.cacheDir(), rec->id), ec);
 		if (rec->meta.importer == "model")
 			requestModel(id);
+		else if (rec->meta.importer == "texture" && m_textureStates.contains(id))
+			requestTexture(id);
 		m_host.emit("library.changed", Json::object());
 		r.ok({ { "id", id } });
 	});

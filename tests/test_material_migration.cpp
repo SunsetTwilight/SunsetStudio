@@ -73,50 +73,36 @@ void makeTemplate(const fs::path& tmpl)
 }
 } // namespace
 
-TEST_CASE("マテリアルの移行: 影と、書き換えていない描画ノードを置き換え、書き換えたものは手で直すものに挙げる")
+TEST_CASE("マテリアルの移行: 影のパスを pipelines/shadow.json に替え、描画ノードは触らない")
 {
 	const fs::path root = freshDir("studio_test_material_migration");
 	const fs::path tmpl = freshDir("studio_test_material_migration_tmpl");
 	makeTemplate(tmpl);
 	write(root / "graphs/viewport.json", k_Graph);
 	write(root / "pipelines/gbuffer.json", k_PlainPipeline);
-	// 描画ノードの既定 (マテリアルのころのテンプレートのまま)。改行が CRLF でも同じとみなす
-	std::string legacy = legacyDrawPipeline("shaders/draw.vs.hlsl", "shaders/draw.ps.hlsl", true);
-	std::string crlf;
-	for (char c : legacy) { if (c == '\n') crlf += '\r'; crlf += c; }
-	write(root / "pipelines/draw.json", crlf);
-	write(root / "shaders/draw.ps.hlsl", legacyDrawPixelShader());
-	write(root / "pipelines/custom.json", k_CustomPipeline);
-	write(root / "shaders/custom.ps.hlsl", "cbuffer Material : register(b2) { float4 baseColor; };");
+	write(root / "pipelines/custom.json", k_CustomPipeline);   // b2 を使う描画ノード (物体ごとのリソースで描ける)
 	write(root / "shaders/common.hlsli", "MINE");   // あるファイルは足さない
 
 	const MaterialMigrationPlan plan = planMaterialRemoval(root, "graphs/viewport.json", tmpl);
 	REQUIRE(plan.needed());
 	std::vector<std::string> files;
 	for (const auto& c : plan.changes) files.push_back(c.file);
-	CHECK(files == std::vector<std::string>{ "graphs/viewport.json", "pipelines/shadow.json", "shaders/shadow.vs.hlsl",
-	                                         "shaders/shadow.ps.hlsl", "pipelines/draw.json", "shaders/draw.ps.hlsl" });
-	REQUIRE(plan.manual.size() == 2);
-	CHECK(plan.manual[0].find("pipelines/custom.json") == 0);
-	CHECK(plan.manual[1].find("shaders/custom.ps.hlsl") == 0);
+	CHECK(files == std::vector<std::string>{ "graphs/viewport.json", "pipelines/shadow.json", "shaders/shadow.vs.hlsl", "shaders/shadow.ps.hlsl" });
+	CHECK(plan.manual.empty());
 
 	std::vector<std::string> written;
 	std::string error;
 	REQUIRE(applyMaterialRemoval(root, plan, written, error));
-	CHECK(written.size() == 6);
+	CHECK(written.size() == 4);
 	const std::string graph = read(root / "graphs/viewport.json");
 	CHECK(graph.find("pipelines/materials/standard.shadow.json") == std::string::npos);
 	CHECK(graph.find("\"pipelines/shadow.json\"") != std::string::npos);
 	CHECK(read(root / "pipelines/shadow.json") == "SHADOW-PIPELINE");
 	CHECK(read(root / "shaders/common.hlsli") == "MINE");
-	CHECK(read(root / "pipelines/draw.json") == drawPipelineText("shaders/draw.vs.hlsl", "shaders/draw.ps.hlsl", true));
-	CHECK(read(root / "shaders/draw.ps.hlsl") == drawPixelShader());
 	CHECK(read(root / "pipelines/custom.json") == k_CustomPipeline);
 
-	// 移したあとは、置き換えるものはない (手で直すものだけが残る)
-	const MaterialMigrationPlan again = planMaterialRemoval(root, "graphs/viewport.json", tmpl);
-	CHECK_FALSE(again.needed());
-	CHECK(again.manual.size() == 2);
+	// 移したあとは何もない
+	CHECK_FALSE(planMaterialRemoval(root, "graphs/viewport.json", tmpl).needed());
 }
 
 TEST_CASE("マテリアルの移行: 今のテンプレートのプロジェクトには何もしない")
@@ -126,11 +112,11 @@ TEST_CASE("マテリアルの移行: 今のテンプレートのプロジェク�
 	  { "name": "Shadow", "type": "Raster", "pipeline": "pipelines/shadow.json", "content": { "drawList": { "layer": "Shadow" } } },
 	  { "name": "Draw", "type": "Raster", "pipeline": "pipelines/draw.json", "content": { "drawList": { "layer": "Draw" } } } ] })");
 	write(root / "pipelines/draw.json", drawPipelineText("shaders/draw.vs.hlsl", "shaders/draw.ps.hlsl", false));
-	write(root / "shaders/draw.ps.hlsl", drawPixelShader());
 	const MaterialMigrationPlan plan = planMaterialRemoval(root, "graphs/viewport.json", root);
 	CHECK_FALSE(plan.needed());
 	CHECK(plan.manual.empty());
-	// 描画ノードの既定には、マテリアルの定数もテクスチャもない
-	CHECK(drawPixelShader().find("register(b2)") == std::string::npos);
-	CHECK(drawPipelineText("a", "b", true).find("DescriptorTable") == std::string::npos);
+	// 描画ノードの既定は、物体ごとのリソース (b2 の Params と t0 の baseColorMap) を持つ
+	CHECK(drawPixelShader().find("cbuffer Params : register(b2)") != std::string::npos);
+	CHECK(drawPixelShader().find("baseColorMap") != std::string::npos);
+	CHECK(drawPipelineText("a", "b", true).find("DescriptorTable") != std::string::npos);
 }

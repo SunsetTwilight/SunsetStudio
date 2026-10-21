@@ -81,6 +81,8 @@ public:
 		std::function<void(const std::string& id)> picked;
 		// シェーダーのホットリロードの結果 (path はエンジンが使ったパス)
 		std::function<void(const std::string& path, bool ok)> shaderReloaded;
+		// 描画ノードのリソースが使うテクスチャで、まだ届いていないもの (アセットの ID)
+		std::function<void(const std::vector<std::string>& ids)> texturesNeeded;
 		// プレビューの表示できない理由が変わった (空なら表示できている)
 		std::function<void(uint32_t id, const std::string& status)> previewStatus;
 		// パイプライン / グラフのファイルを読み直した (保存していない変更を調べ直す)

@@ -190,5 +190,16 @@ void EditorApp::registerSceneMethods()
 			r.ok({ { "id", scene->pick(x, y, w, h, m_render.camera()) } });
 		});
 	});
+
+	// 物体の描画ノードのリソース (シェーダーの cbuffer とテクスチャ)。インスペクターの欄を作るため。
+	// 値はシーンの nodeParams / slotNodeParams に scene.set で書く
+	b.registerMethod("scene.nodeResources", [this](const Json& p, Bridge::Reply r) {
+		const std::string id = p.value("id", std::string());
+		m_render.postScene([r, id](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return r.error(BridgeError::Unavailable, "プロジェクトを開いていません");
+			r.ok({ { "id", id }, { "nodes", scene->describeNodeResources(id) } });
+		});
+	});
 }
 } // namespace studio

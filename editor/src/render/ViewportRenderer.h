@@ -18,6 +18,7 @@
 
 #include "LightSystem.h"
 #include "ModelCache.h"
+#include "NodeResources.h"
 #include "OrbitCamera.h"
 #include "ResourceViewer.h"
 #include "SelectionOutline.h"
@@ -31,6 +32,7 @@
 
 #include <array>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -70,9 +72,15 @@ public:
 
 	// シーンの物体を置き換える (M5-2)。asset:<ID> のモデルは setModel で届いてから描く。届くまでは何も描かない
 	void setScene(GraphicsEngine& engine, const SceneDesc& scene);
-	// 取り込んだモデルを入れる / 入れ替える (M5-3)。model が nullptr なら外す
-	void setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model);
-	LightSystem& lights() { return m_lights; }
+	// 取り込んだモデルを入れる / 入れ替える (M5-3)。model が nullptr なら外す。
+	// imported はスロットごとの取り込んだ値 (services/NodeParams の importedValues。描画ノードのリソースの既定)
+	void setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model,
+	              std::vector<Json> imported = {});
+	LightSystem&   lights()        { return m_lights; }
+	NodeResources& nodeResources() { return m_nodeRes; }
+	// 物体の描画ノードのリソースの説明 (UI 用): [{ layer, pass, pipeline, ok, error?, cbuffers, textures,
+	//   imported: { スロット: 取り込んだ値 } }]。物体の描画レイヤー (と、影を落とすなら Shadow) の描画ノードごと
+	Json describeNodeResources(const std::string& objectId);
 	// 選んでいる物体 (空なら選んでいない)。render で辺の印を描く
 	void setSelection(const std::string& id) { m_selection = id; }
 	// ビューポートのピクセル (x, y) の下の物体の id (なければ空)
@@ -108,6 +116,10 @@ private:
 		uint32_t     indexOffset = 0;
 		BufferHandle cb;          // ワールド行列と色 (common.hlsli の Object)
 		std::vector<std::string> layers;   // 描くレイヤー (Scene の drawLayersOf)
+		std::string  slot;        // スロットの名前 (立方体は "Default")
+		const Json*  imported = nullptr;   // スロットの取り込んだ値 (m_imported の中。なければ null)
+		std::map<std::string, Json> objectParams, slotParams;   // 描画ノードの layer → 物体 / スロットの値
+		std::map<std::string, NodeResources::Cache> resources;  // 描画ノードの layer → 物体ごとのリソース
 		Mat4         world;       // どこにも描かれないときの印に使う
 	};
 	struct Object
@@ -143,13 +155,15 @@ private:
 	std::vector<Object> m_objects;
 	ModelCache          m_models;
 	LightSystem         m_lights;
+	NodeResources       m_nodeRes;
+	std::map<std::string, std::vector<Json>> m_imported;   // モデルの ID → スロットごとの取り込んだ値
+	uint64_t            m_paramsVersion = 1;                // 物体を作り直すたびに上げる (リソースの値の版)
 	Float3              m_sunDirection { -0.396f, -0.880f, -0.264f };   // フレームの gLightDir (最初の平行光源。古いシェーダー用)
 	// 影 (平行光源 1 つ、シーン全体に 1 枚): パスの view が "shadow" のとき、フレームの定数を光の視点にする
 	bool                m_shadowActive = false;
 	Mat4                m_shadowViewProj = Mat4::identity();
 	BufferHandle        m_shadowFrameCB;
 	GraphicsEngine*     m_engine = nullptr;   // draw の中で使う (init から shutdown まで)
-	std::set<std::string> m_unboundReported;  // つないでいないルートパラメーターを知らせたもの (パイプライン#番号)
 	size_t              m_reportedPipelineErrors = 0;
 	size_t              m_reportedExecutorErrors = 0;
 };

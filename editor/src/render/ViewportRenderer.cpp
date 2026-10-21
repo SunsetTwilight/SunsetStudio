@@ -66,7 +66,6 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 	m_root      = assetRoot;
 	m_graphFile = graphFile;
 	m_reportedPipelineErrors = m_reportedExecutorErrors = 0;
-	m_unboundReported.clear();
 	m_pipelines = std::make_unique<gfx::rg::PipelineLibrary>(engine, shaders);
 	m_pipelines->setRoot(assetRoot);
 	m_executor  = std::make_unique<gfx::rg::Executor>(engine, *m_pipelines);
@@ -122,6 +121,7 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 			m_viewerError += (m_viewerError.empty() ? "" : "\n") + overlayError;
 	}
 	m_engine = &engine;
+	m_nodeRes.init(engine, shaders, *m_pipelines);
 	// 物体はシーンのファイルから (setScene)
 	return true;
 }
@@ -146,6 +146,8 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 	m_objects.clear();
 	m_models.clear(engine);
 	m_lights.shutdown(engine);
+	m_nodeRes.shutdown(engine);
+	m_imported.clear();
 	m_engine = nullptr;
 	engine.destroyBuffer(m_vb);
 	engine.destroyBuffer(m_ib);
@@ -170,8 +172,10 @@ ViewportRenderer::PollResult ViewportRenderer::pollAssets()
 		r.graphRecompiled = m_graph->recompile(m_options);
 		r.graphFailed     = m_graph->lastFailed();
 	}
-	// ライトの種類の変更
+	// ライトの種類の変更。パイプラインが変わったら、描画ノードのリソースを調べ直す
 	m_lights.poll();
+	if (!pr.reloaded.empty() || r.graphReloaded)
+		m_nodeRes.invalidate();
 	if (r.graphReloaded || r.graphRecompiled || r.graphFailed)
 		r.graphMessages = m_graph->messages();
 	m_graph->clearStatus();
@@ -189,6 +193,8 @@ std::vector<std::string> ViewportRenderer::takeNewErrors()
 	if (!m_pipelines || !m_executor)
 		return out;
 	for (auto& e : m_lights.takeErrors())
+		out.push_back(std::move(e));
+	for (auto& e : m_nodeRes.takeErrors())
 		out.push_back(std::move(e));
 	const auto& pe = m_pipelines->errors();
 	for (; m_reportedPipelineErrors < pe.size(); ++m_reportedPipelineErrors)
@@ -293,16 +299,21 @@ void ViewportRenderer::setScene(GraphicsEngine& engine, const SceneDesc& scene)
 	updateObjects(engine);
 }
 
-void ViewportRenderer::setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model)
+void ViewportRenderer::setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model,
+                                std::vector<Json> imported)
 {
 	if (model)
 	{
 		std::string error;
 		if (!m_models.set(engine, id, *model, error))
 			m_viewerError += (m_viewerError.empty() ? "" : "\n") + error;
+		m_imported[id] = std::move(imported);
 	}
 	else
+	{
 		m_models.remove(engine, id);
+		m_imported.erase(id);
+	}
 	updateObjects(engine);
 }
 
@@ -312,12 +323,15 @@ void ViewportRenderer::releaseDraws(GraphicsEngine& engine, Object& o, size_t ke
 	{
 		if (o.draws.back().cb.valid())
 			engine.destroyBuffer(o.draws.back().cb);
+		for (auto& [layer, cache] : o.draws.back().resources)
+			NodeResources::release(engine, cache);
 		o.draws.pop_back();
 	}
 }
 
 void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 {
+	++m_paramsVersion;   // 物体ごとのリソースの値を詰め直す
 	const SceneDesc&          scene   = m_sceneDesc;
 	const std::vector<Matrix> world   = worldMatrices(scene);
 	const std::vector<bool>   visible = effectiveVisibility(scene);
@@ -385,10 +399,12 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 			uint32_t     count = 0, offset = 0;
 			Mat4         world;
 			std::vector<std::string> layers;
+			std::string  slot;
+			const Json*  imported = nullptr;
 		};
 		std::vector<Want> wants;
 		if (so.model == "builtin:cube")
-			wants.push_back({ m_vb, m_ib, GfxFormat::R16_Uint, 36, 0, o.world, drawLayersOf(so, "Default") });
+			wants.push_back({ m_vb, m_ib, GfxFormat::R16_Uint, 36, 0, o.world, drawLayersOf(so, "Default"), "Default", nullptr });
 		else if (const auto modelId = assetIdOfModel(so.model))
 		{
 			if (const ModelCache::Gpu* gpu = m_models.find(*modelId))
@@ -398,8 +414,11 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 				{
 					const std::string slot = d.slot < gpu->slotNames.size() ? gpu->slotNames[d.slot] : std::string();
 					const ModelCache::Mesh& mesh = gpu->meshes[d.mesh];
+					const Json* imported = nullptr;
+					if (const auto im = m_imported.find(*modelId); im != m_imported.end() && d.slot < im->second.size())
+						imported = &im->second[d.slot];
 					wants.push_back({ mesh.vb, mesh.ib, GfxFormat::R32_Uint, d.indexCount, d.indexOffset, o.world * d.node,
-					                  drawLayersOf(so, slot) });
+					                  drawLayersOf(so, slot), slot, imported });
 				}
 			}
 		}
@@ -415,6 +434,15 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 			d.indexCount  = w.count;
 			d.indexOffset = w.offset;
 			d.layers      = w.layers;
+			d.slot        = w.slot;
+			d.imported    = w.imported;
+			d.objectParams.clear();
+			d.slotParams.clear();
+			for (const auto& [layer, v] : so.nodeParams)
+				d.objectParams[layer] = v;
+			if (const auto sp = so.slotNodeParams.find(w.slot); sp != so.slotNodeParams.end())
+				for (const auto& [layer, v] : sp->second)
+					d.slotParams[layer] = v;
 			d.world       = w.world;
 			if (!d.cb.valid())
 				d.cb = engine.createBuffer({ sizeof(ObjectConstants), BufferUsage::Uniform });
@@ -530,25 +558,11 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 	const bool shadowPass = layer == k_ShadowPass;
 	if (shadowPass && !m_shadowActive)
 		return;   // 影を落とすライトがない
-	// パイプラインのルートパラメーターで、パス (定数 / 入出力の bind) がつないでいないものがあれば描かない。
-	// つながないまま描くと、GPU が初期化していない値を読む (マテリアルのころのパイプラインの b2 / t0 など)
-	if (const GfxBindingLayoutDesc* bl = m_pipelines->bindingLayout(ctx.pass->desc.pipeline))
-	{
-		std::vector<bool> bound(bl->numParameters, false);
-		auto mark = [&](int32_t p) { if (p >= 0 && p < static_cast<int32_t>(bound.size())) bound[static_cast<size_t>(p)] = true; };
-		for (const auto& c : ctx.pass->desc.constants) mark(c.bind.param);
-		for (const auto& r : ctx.pass->desc.inputs)    mark(r.bind.param);
-		for (const auto& r : ctx.pass->desc.outputs)   mark(r.bind.param);
-		for (uint32_t i = 0; i < bl->numParameters; ++i)
-			if (!bound[i])
-			{
-				if (m_unboundReported.insert(ctx.pass->desc.pipeline + "#" + std::to_string(i)).second)
-					m_viewerError += (m_viewerError.empty() ? "" : "\n") + std::string("パス ") + ctx.pass->name + " のパイプライン " +
-					                 ctx.pass->desc.pipeline + " のルートパラメーター " + std::to_string(i) +
-					                 " をつないでいないので、メッシュを描きません (マテリアルのころのパイプラインなら、ファイル > マテリアルなしの描画に移す)";
-				return;
-			}
-	}
+	// 描画ノードのリソース: パイプラインのルートパラメーターで、グラフがつながないものは物体ごとにつなぐ
+	// (CBV = 定数、SRV のテーブル = テクスチャ)。つなげない種類があれば描かない (GPU が初期化していない値を読まないように)
+	const NodeResources::Interface& itf = m_nodeRes.interfaceOf(ctx.pass->desc);
+	if (!itf.ok)
+		return;
 	const int32_t objectParam = ctx.paramOf("object");
 	uint64_t lastVb = 0, lastIb = 0;
 	for (const Object& o : m_objects)
@@ -575,9 +589,66 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 			}
 			if (objectParam >= 0)
 				ctx.cb->setRootDescriptor(static_cast<uint32_t>(objectParam), d.cb, 0);
+			if (!itf.empty())
+			{
+				// 決まった値: 取り込んだ値 → 物体 → スロット
+				DrawItem& dm = const_cast<DrawItem&>(d);
+				NodeResources::Cache& cache = dm.resources[layer];
+				if (m_nodeRes.stale(itf, cache, m_paramsVersion))
+				{
+					const auto op = d.objectParams.find(layer);
+					const auto sp = d.slotParams.find(layer);
+					const Json values = mergeNodeParams(d.imported ? *d.imported : Json(), op != d.objectParams.end() ? op->second : Json(),
+					                                    sp != d.slotParams.end() ? sp->second : Json());
+					m_nodeRes.prepare(*m_engine, itf, values, m_paramsVersion, cache);
+				}
+				NodeResources::bind(ctx.cb, itf, cache);
+			}
 			ctx.cb->drawIndexedInstanced(d.indexCount, 1, d.indexOffset, 0, 0);
 		}
 	}
+}
+
+Json ViewportRenderer::describeNodeResources(const std::string& objectId)
+{
+	Json out = Json::array();
+	const SceneObject* so = m_sceneDesc.find(objectId);
+	if (!so || so->light || !m_graph || !m_graph->valid())
+		return out;
+	// 物体のメッシュが描かれる layer (スロットの上書きも含む) と、影を落とすなら Shadow
+	std::vector<std::string> layers;
+	Json imported = Json::object();
+	for (const Object& o : m_objects)
+		if (o.id == objectId)
+			for (const DrawItem& d : o.draws)
+			{
+				for (const auto& l : d.layers)
+					if (std::find(layers.begin(), layers.end(), l) == layers.end())
+						layers.push_back(l);
+				if (d.imported && !imported.contains(d.slot))
+					imported[d.slot] = *d.imported;
+			}
+	if (so->castShadow)
+		layers.push_back(k_ShadowPass);
+	for (const std::string& layer : layers)
+	{
+		const gfx::rg::PassDesc* pass = nullptr;
+		for (const auto& p : m_graph->desc().passes)
+			if (p.enabled && p.content.kind == gfx::rg::ContentKind::DrawList && p.content.drawList.layer == layer)
+			{
+				pass = &p;
+				break;
+			}
+		if (!pass)
+			continue;   // グラフにない layer (ピンクで描く)
+		Json j = NodeResources::describe(m_nodeRes.interfaceOf(*pass));
+		j["layer"]    = layer;
+		j["pass"]     = pass->name;
+		j["pipeline"] = pass->pipeline;
+		j["imported"] = imported;
+		out.push_back(std::move(j));
+	}
+	return out;
 }
 
 BufferHandle ViewportRenderer::constants(const std::string& source, const gfx::rg::DrawContext& ctx)

@@ -27,6 +27,8 @@
 //  ・layers は描画レイヤー (グラフの drawList の layer) の名前の配列。この物体を描くノードを選ぶ。
 //    slotLayers はスロットの名前 → 描画レイヤーで、そのスロットだけ上書きする。どちらも書いていなければ既定の
 //    "Opaque"。空の配列は「どこにも描かない」(エディターがピンクで見せる)。Shadow は castShadow で決まる
+//  ・nodeParams は描画ノードの layer → その描画ノードのシェーダーが使うリソースの値 ({ 変数: 値 / "asset:<ID>" })。
+//    slotNodeParams はスロット → layer → 値で、そのスロットだけ上書きする (services/NodeParams.h)
 //  行列は列優先 (m[列 * 4 + 行]、OrbitCamera.h の Mat4 と同じ)。
 // ============================================================
 
@@ -78,6 +80,8 @@ struct SceneObject
 	bool                      castShadow = true;     // 影を落とす
 	std::optional<std::vector<std::string>> layers;  // 描画レイヤー (なければ既定)
 	std::map<std::string, std::vector<std::string>> slotLayers;   // スロット → 描画レイヤー (物体の指定を上書き)
+	std::map<std::string, Json> nodeParams;                        // 描画ノードの layer → リソースの値 (オブジェクト)
+	std::map<std::string, std::map<std::string, Json>> slotNodeParams;   // スロット → layer → 値 (物体の値を上書き)
 };
 
 struct SceneDesc
@@ -132,6 +136,9 @@ std::array<float, 3> transformPoint(const Matrix& m, const std::array<float, 3>&
 constexpr const char* k_DefaultDrawLayer = "Opaque";   // 何も指定していない物体のレイヤー
 // 物体のスロットを描くレイヤー: スロットの上書き → 物体の layers → 既定 ("Opaque")
 std::vector<std::string> drawLayersOf(const SceneObject& o, const std::string& slot);
+// 物体 / スロットの、描画ノード layer のリソースの値 (なければ null)
+const Json& objectNodeParams(const SceneObject& o, const std::string& layer);
+const Json& slotNodeParams(const SceneObject& o, const std::string& slot, const std::string& layer);
 
 // 新しいプロジェクトの既定のシーン (M4 までの固定の立方体と同じ並び: 中央の大きな立方体 + 周りの 48 個、
 // 影を受ける地面 "Ground" (薄い箱)、今までの光と同じ向きの、影を落とす平行光源 "Sun" (最後))

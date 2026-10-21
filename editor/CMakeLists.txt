@@ -39,6 +39,8 @@ add_library(studio_services STATIC
     src/services/ProjectAssets.cpp
     src/services/MaterialMigration.h  # マテリアル (M5-4) を外したときの、既存のプロジェクトの移行
     src/services/MaterialMigration.cpp
+    src/services/NodeParams.h         # 描画ノードのリソースの値 (詰め方、取り込んだ値、決まる順)
+    src/services/NodeParams.cpp
     src/services/LightTypes.h         # ライトの種類 (定義、値の詰め方、hlsli の生成。M5-5)
     src/services/LightTypes.cpp
 )
@@ -73,6 +75,8 @@ add_executable(SunsetEditor
     src/render/ViewportRenderer.cpp
     src/render/ResourceViewer.h
     src/render/ResourceViewer.cpp
+    src/render/NodeResources.h
+    src/render/NodeResources.cpp
     src/render/SelectionOutline.h
     src/render/SelectionOutline.cpp
     src/render/UnassignedOverlay.h

@@ -369,6 +369,13 @@ int EditorApp::run()
 			m_host.emit("scene.picked", { { "id", id } });
 		});
 	};
+	callbacks.texturesNeeded = [this](const std::vector<std::string>& ids) {
+		m_host.post([this, ids] {
+			for (const auto& id : ids)
+				if (!m_textureStates.contains(id))
+					requestTexture(id);
+		});
+	};
 	callbacks.shaderReloaded = [this](const std::string& path, bool ok) {
 		if (ok)
 			m_host.post([this, path] { onShaderStatus(path, true, {}); });

@@ -109,6 +109,9 @@ private:
 	                   std::shared_ptr<const sunset::asset::Model> model, const sunset::asset::Diagnostics& diag, double ms);
 	// スロットの取り込んだ値 (基本色、金属度、粗さ、テクスチャ) で作る標準のマテリアル
 	void registerProjectFileMethods();   // EditorProjectFiles.cpp
+	// 描画ノードのリソースの既定: モデルのスロットごとの取り込んだ値 (EditorLibrary.cpp)
+	std::vector<Json> importedSlotValues(const std::string& modelId, const sunset::asset::Model& model) const;
+	void requestTexture(const std::string& id);      // テクスチャを別のスレッドで読み、描画スレッドに渡す
 	void ensureProjectSupport(const Project& project);   // ライトの種類と common.hlsli がなければ、テンプレートから足す
 	Json materialMigrationJson() const;                  // マテリアルのころのプロジェクトの移行 (なければ null)
 	Json sceneInfoJson() const;
@@ -234,8 +237,15 @@ private:
 		std::string error;
 		Json        info;     // ノード / メッシュ / 頂点 / 三角形 / スロットの数
 		uint64_t    ticket = 0;
+		std::vector<Json> imported;   // スロットごとの取り込んだ値 (描画ノードのリソースの既定)
 	};
 	std::map<std::string, ModelState> m_modelStates;
+	struct TextureState
+	{
+		std::string status;   // "loading" / "ready" / "error"
+		uint64_t    ticket = 0;
+	};
+	std::map<std::string, TextureState> m_textureStates;
 	struct { int x = 0, y = 0, w = 0, h = 0; bool visible = false; } m_viewportWebRect;   // Web のパネルの矩形 (戻すときに使う)
 	int      m_exitCode      = 0;
 	BackgroundQueue m_libraryWorker;   // 最後に置く (先に止まる)。run の終わりでも止める

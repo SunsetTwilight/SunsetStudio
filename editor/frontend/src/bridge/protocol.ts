@@ -170,12 +170,34 @@ export interface SceneObjectJson {
   rotation: [number, number, number]; // 度 (X → Y → Z の順に回す)
   scale: [number, number, number];
   visible: boolean;
-  color: [number, number, number, number]; // マテリアルの色に掛ける色
+  color: [number, number, number, number]; // 物体の色 (シェーダーの gColor)
   materials?: Record<string, string>; // M5-4 のマテリアルの割り当て (2026-10-22 に外した。読み書きで保つだけ)
   light?: SceneLightJson; // あればライト (モデルは描かない。M5-5)
   castShadow?: boolean; // false なら影を落とさない (書いていなければ落とす)
   layers?: string[]; // 描画レイヤー (drawList の layer)。書いていなければ "Opaque"、空 = どこにも描かない
   slotLayers?: Record<string, string[]>; // スロット → 描画レイヤー (物体の layers を上書き)
+  // 描画ノードのリソースの値: layer → { 変数: 値 / "asset:<ID>" }。slotNodeParams はスロットごとの上書き
+  nodeParams?: Record<string, Record<string, JsonValue>>;
+  slotNodeParams?: Record<string, Record<string, Record<string, JsonValue>>>;
+}
+
+// 描画ノードのリソース (scene.nodeResources): 描画ノードのシェーダーが使う、グラフがつながない cbuffer とテクスチャ
+export interface NodeResourceVar {
+  name: string;
+  type: 'float' | 'int' | 'uint' | 'bool';
+  rows: number;
+  columns: number;
+  elements: number; // 配列の要素数 (0 = 配列でない)
+}
+export interface NodeResourceInfo {
+  layer: string;
+  pass: string;
+  pipeline: string;
+  ok: boolean;
+  error?: string; // つなげないルートパラメーターがある (このノードでは描かない)
+  cbuffers: { name: string; register: number; vars: NodeResourceVar[] }[];
+  textures: { name: string; srgb: boolean; default: 'white' | 'flatNormal' }[];
+  imported: Record<string, Record<string, JsonValue>>; // スロット → 取り込んだ値 (名前で合わせる既定)
 }
 export interface SceneShadowJson {
   enabled: boolean;
@@ -390,6 +412,7 @@ export interface Methods {
   'scene.save': { params: Record<string, never>; result: { revision: number; dirty: boolean } };
   'scene.select': { params: { id: string }; result: { id: string } };
   'scene.pickAt': { params: { x: number; y: number }; result: { id: string } };
+  'scene.nodeResources': { params: { id: string }; result: { id: string; nodes: NodeResourceInfo[] } };
   'library.list': { params: Record<string, never>; result: LibraryInfo };
   'library.import': { params: { mode: 'copy' | 'link'; file?: string }; result: LibraryImportResult };
   'library.refresh': { params: Record<string, never>; result: { created: number; reIded: number; reloaded: string[] } };
