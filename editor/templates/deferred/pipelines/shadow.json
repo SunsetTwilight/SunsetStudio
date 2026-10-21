@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "type": "graphics",
+  "shaders": {
+    "vs": { "file": "shaders/shadow.vs.hlsl" },
+    "ps": { "file": "shaders/shadow.ps.hlsl" }
+  },
+  "layout": {
+    "parameters": [
+      { "parameterType": "CBV", "shaderRegister": 0 },
+      { "parameterType": "CBV", "shaderRegister": 1 }
+    ],
+    "numParameters": 2,
+    "flags": [ "AllowInputAssemblerInputLayout" ]
+  },
+  "state": {
+    "rasterizerState": { "cullMode": "None", "frontCounterClockwise": true, "depthBias": 0, "slopeScaledDepthBias": 1.5 },
+    "inputLayout": {
+      "elements": [
+        { "semanticName": "POSITION", "format": "R32G32B32_Float", "alignedByteOffset": 0 }
+      ],
+      "elementCount": 1
+    }
+  }
+}

@@ -98,8 +98,9 @@ TEST_CASE("プロジェクト: テンプレートから作って開く")
 	CHECK(p.assetRoot() == p.dir());   // version 2: 直下に並べる
 	CHECK(fs::exists(p.dir() / "graphs" / "viewport.json"));
 	CHECK(fs::exists(p.dir() / "shaders" / "a.hlsl"));
-	for (const char* d : { "scenes", "materials", "lights", "pipelines", "assets" })
+	for (const char* d : { "scenes", "lights", "pipelines", "assets" })
 		CHECK_MESSAGE(fs::is_directory(p.dir() / d), d);
+	CHECK_FALSE(fs::exists(p.dir() / "materials"));   // マテリアルは 2026-10-22 に外した
 	CHECK_FALSE(fs::exists(p.dir() / "Assets" / "graphs"));
 	CHECK(fs::is_directory(p.savedDir()));
 	{

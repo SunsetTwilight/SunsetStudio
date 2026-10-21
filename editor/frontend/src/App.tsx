@@ -11,7 +11,7 @@
 //  ビューポートの上には C++ の子ウィンドウが重なる (ViewportPanel)。
 //  プロジェクトを開いていないときは、起動画面 (StartScreen) を出す (M4a)。
 // ============================================================
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { DockviewReact, themeDark, type DockviewReadyEvent, type IDockviewPanelProps, type SerializedDockview } from 'dockview-react';
 import 'dockview-react/dist/styles/dockview.css';
 import { call, installEventSink, isConnected, on, StudioError } from './bridge/client';
@@ -23,8 +23,6 @@ import { StartScreen } from './panels/StartScreen';
 import { PreviewPanel, type PreviewParams } from './panels/PreviewPanel';
 import { AssetPanel, type AssetParams } from './panels/AssetPanel';
 import { PipelinePanel, type PipelineParams } from './panels/PipelinePanel';
-import { MaterialPanel, type MaterialParams } from './panels/MaterialPanel';
-import { loadMaterialFiles } from './state/material';
 import { ScenePanel } from './panels/ScenePanel';
 import { LibraryPanel } from './panels/LibraryPanel';
 import { loadLibrary } from './state/library';
@@ -33,7 +31,7 @@ import { loadPipelineShaders, loadShaderErrors } from './state/assets';
 import { ViewerPanel } from './panels/ViewerPanel';
 import { TitleBar } from './panels/TitleBar';
 import { UnsavedDialog } from './panels/UnsavedDialog';
-import { undoRedo, saveAll } from './state/commands';
+import { undoRedo, saveAll, migrateMaterials } from './state/commands';
 import { NodeEditorPanel } from './nodegraph/NodeEditorPanel';
 import { ViewportPanel } from './panels/ViewportPanel';
 import { defaultLayout, setDockApi, showPanel, watchDragOut } from './state/dock';
@@ -52,7 +50,6 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   preview: (props) => <PreviewPanel {...(props as IDockviewPanelProps<PreviewParams>)} />,
   asset: (props) => <AssetPanel {...(props as IDockviewPanelProps<AssetParams>)} />,
   pipeline: (props) => <PipelinePanel {...(props as IDockviewPanelProps<PipelineParams>)} />,
-  material: (props) => <MaterialPanel {...(props as IDockviewPanelProps<MaterialParams>)} />,
 };
 
 export function App() {
@@ -86,7 +83,6 @@ export function App() {
     // ライブラリ: 取り込み / 読み込みの状態が変わったら読み直す
     const offLibrary = on('library.changed', () => void loadLibrary());
     // マテリアルのファイルが増えた / 変わった (一覧を読み直す。タブは自分で読み直す)
-    const offMaterial = on('material.changed', () => void loadMaterialFiles());
     const offPicked = on('scene.picked', (e) => {
       if (e.id) {
         studioStore.select({ kind: 'object', id: e.id });
@@ -110,7 +106,6 @@ export function App() {
       offScene();
       offPicked();
       offLibrary();
-      offMaterial();
     };
 
     if (!isConnected()) {
@@ -145,7 +140,6 @@ export function App() {
     call('project.unsaved').then(studioStore.setUnsaved).catch(() => {});
     void loadShaderErrors();
     void loadScene();
-    void loadMaterialFiles();
   }, [project?.open, project?.file]);
 
   // 選んでいる物体をビューポートに伝える (辺の印)
@@ -160,6 +154,16 @@ export function App() {
   useEffect(() => {
     if (isConnected() && project?.open && graphPipelines) void loadPipelineShaders(graphPipelines.split('\n'));
   }, [graphPipelines, project?.open]);
+  // マテリアル (M5-4) のころのプロジェクトを開いたら、移すか一度だけ聞く (あとからはタイトルバー / メニューから)
+  const migration = useStudio((s) => s.project?.materialMigration);
+  const askedMigration = useRef('');
+  useEffect(() => {
+    const file = studioStore.get().project?.file ?? '';
+    if (!migration?.changes.length || askedMigration.current === file) return;
+    askedMigration.current = file;
+    void migrateMaterials();
+  }, [migration]);
+
   // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z (文字を入力している欄では、ブラウザの取り消しを優先する)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

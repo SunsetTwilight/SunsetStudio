@@ -1,4 +1,4 @@
-// G-Buffer: アルベドとワールドの法線を書く (マテリアルのない描画用。物体はマテリアル (shaders/materials/) で描く)
+// G-Buffer: アルベド (物体の色) とワールドの法線、ライトリンクのマスクを書く
 #include "common.hlsli"
 
 struct PSIn

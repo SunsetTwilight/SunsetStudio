@@ -18,6 +18,7 @@ import {
   closeWindow,
   floatViewport,
   importAsset,
+  migrateMaterials,
   migrateProject,
   minimizeWindow,
   newProject,
@@ -100,6 +101,9 @@ export function TitleBar() {
           ...(open && project?.legacyLayout
             ? [separator('s3'), { id: 'migrate', label: '古い構成 (Assets/) を新しい構成に移す…', run: migrateProject } as MenuItem]
             : []),
+          ...(open && project?.materialMigration?.changes.length
+            ? [separator('s3m'), { id: 'migrateMaterials', label: 'マテリアルなしの描画に移す…', title: 'マテリアルを前提にした描画のファイルを書き換える', run: migrateMaterials } as MenuItem]
+            : []),
           separator('s4'),
           { id: 'close', label: 'プロジェクトを閉じる', mnemonic: 'C', disabled: !open, run: closeProject },
           separator('s5'),
@@ -178,7 +182,7 @@ export function TitleBar() {
         ],
       },
     ];
-  }, [open, project?.legacyLayout, recent, edit, viewer?.enabled, floating, frame, maximized, devTools]);
+  }, [open, project?.legacyLayout, project?.materialMigration, recent, edit, viewer?.enabled, floating, frame, maximized, devTools]);
 
   const close = useCallback(() => {
     setOpenMenu(-1);
@@ -419,6 +423,12 @@ export function TitleBar() {
           <span className="chip legacy" title="アセットが Assets/ の下にある古い構成です。ファイル > 古い構成を新しい構成に移す">
             古い構成 (Assets/)
             <button onClick={() => void migrateProject()}>移す</button>
+          </span>
+        )}
+        {open && !!project?.materialMigration?.changes.length && (
+          <span className="chip legacy" title={'マテリアルを前提にした描画のファイルがあります (このままでは正しく描けません):\n' + project.materialMigration.changes.join('\n')}>
+            マテリアルのころのプロジェクト
+            <button onClick={() => void migrateMaterials()}>移す</button>
           </span>
         )}
         {open && viewer?.enabled && viewer.resource && (

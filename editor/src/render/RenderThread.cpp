@@ -241,9 +241,8 @@ void RenderThread::renderPreviews(GraphicsEngine& engine)
 // 保存されたアセットを反映し、結果と新しいエラーをログに出す
 void RenderThread::pollAssets()
 {
-	// .hlsl (使っているパイプラインはエンジンが作り直す)。変わったら、マテリアルのリフレクションも調べ直す
-	if (m_shaders->poll().reloaded > 0)
-		m_scene.materials().invalidateShaders();
+	// .hlsl (使っているパイプラインはエンジンが作り直す)
+	m_shaders->poll();
 	const ViewportRenderer::PollResult r = m_scene.pollAssets();
 	auto log = [this](const char* level, const std::string& text) {
 		if (m_callbacks.log)
@@ -259,10 +258,6 @@ void RenderThread::pollAssets()
 	if (r.graphFailed)     log("warning", "グラフを読み直せませんでした (元のまま): " + m_scene.graphFile());
 	for (const auto& e : m_scene.takeNewErrors())
 		log("error", e);
-	// マテリアルが使うのにまだ届いていないテクスチャ (前のフレームの描画で見つけたもの) を UI スレッドに頼む
-	if (m_callbacks.texturesNeeded)
-		if (std::vector<std::string> ids = m_scene.materials().takeMissingTextures(); !ids.empty())
-			m_callbacks.texturesNeeded(ids);
 	notifyGraph();
 }
 

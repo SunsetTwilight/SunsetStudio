@@ -322,7 +322,7 @@ int EditorApp::run()
 	registerSceneMethods();
 	registerSaveMethods();
 	registerLibraryMethods();
-	registerMaterialMethods();
+	registerProjectFileMethods();
 	m_recent.load();
 
 	// ---- エンジン (描画スレッド) ----
@@ -367,13 +367,6 @@ int EditorApp::run()
 			m_sceneSelection = id;
 			m_render.postScene([id](GraphicsEngine&, ViewportRenderer* scene) { if (scene) scene->setSelection(id); });
 			m_host.emit("scene.picked", { { "id", id } });
-		});
-	};
-	callbacks.texturesNeeded = [this](const std::vector<std::string>& ids) {
-		m_host.post([this, ids] {
-			for (const auto& id : ids)
-				if (!m_textureStates.contains(id))
-					requestTexture(id);
 		});
 	};
 	callbacks.shaderReloaded = [this](const std::string& path, bool ok) {
@@ -1025,18 +1018,7 @@ void EditorApp::checkSmokeTest()
 		if (!m_sceneError.empty() || !m_sceneData.objects.empty())
 			return finish(14, "空のプロジェクトのシーンが空でない: " + m_sceneError);
 		log("info", "smoke", "project.create: 空のテンプレートから作って開き、エラーなく描けた");
-		// 移行で足した標準のマテリアルのシェーダーが、空のプロジェクトでもコンパイルできること (Opaque の描画ノードで使う)
-		m_smokeStage = SmokeStage::EmptyShaders;
-		compileSmokeShaders({ "shaders/materials/standard.gbuffer.vs.hlsl", "shaders/materials/standard.gbuffer.ps.hlsl",
-		                      "shaders/materials/standard.shadow.vs.hlsl", "shaders/materials/standard.shadow.ps.hlsl" },
-			[this, finish](bool ok, const std::string& error) {
-				m_host.post([this, finish, ok, error] {
-					if (!ok)
-						return finish(14, "空のプロジェクトで標準のマテリアルのシェーダーをコンパイルできない: " + error);
-					log("info", "smoke", "shader.compile: 空のプロジェクトで標準のマテリアルのシェーダーをコンパイルできた");
-					finish(0, "");
-				});
-			});
+		finish(0, "");
 		return;
 	default:
 		return;
@@ -1263,6 +1245,7 @@ Json EditorApp::projectJson() const
 		{ "engine",    m_project->desc.engine },
 		{ "graph",     m_project->desc.viewportGraph },
 		{ "legacyLayout", m_project->desc.legacyLayout() },
+		{ "materialMigration", materialMigrationJson() },   // マテリアルのころのプロジェクトなら、移すもの
 		{ "scene",     m_project->desc.viewportScene },
 	};
 }
@@ -1282,7 +1265,7 @@ void EditorApp::openProject(const std::filesystem::path& file, std::function<voi
 	for (const auto& w : diag.warnings)
 		log("warning", "project", w);
 
-	ensureMaterialSupport(project);   // M5-4 より前のプロジェクトに、標準のマテリアルのファイルを足す
+	ensureProjectSupport(project);   // M5-5 より前のプロジェクトに、ライトの種類のファイルを足す
 	m_projectBusy = true;
 	closeAllPreviews();   // 前のプロジェクトのリソースを表示している
 	m_shaderErrors.clear();
@@ -1518,21 +1501,6 @@ void EditorApp::registerEditMethods()
 			return r.error(BridgeError::Unavailable, undo ? "元に戻す編集がありません" : "やり直す編集がありません");
 		const UndoStack::Entry entry = *top;
 		const Json target = undo ? entry.before : entry.after;
-		// マテリアル (M5-4): ファイルを書き戻す (UI スレッドで。描画には writeMaterialFile が伝える)
-		if (entry.kind == "material")
-		{
-			std::string error;
-			if (!writeMaterialFile(entry.target, target, false, error))
-			{
-				log("error", "edit", std::string(undo ? "元に戻せません: " : "やり直せません: ") + entry.label + "\n" + error);
-				return r.error(BridgeError::Unavailable, error);
-			}
-			if (undo) m_undo.didUndo();
-			else      m_undo.didRedo();
-			emitEditState();
-			log("info", "edit", std::string(undo ? "元に戻しました: " : "やり直しました: ") + entry.label);
-			return r.ok({ { "label", entry.label }, { "kind", entry.kind }, { "target", entry.target }, { "state", m_undo.state() } });
-		}
 		m_editBusy = true;
 		m_render.postScene([this, r, entry, target, undo](GraphicsEngine& engine, ViewportRenderer* scene) {
 			EditOutcome o;

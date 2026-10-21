@@ -125,6 +125,23 @@ export const migrateProject = () =>
     studioStore.setProject(await call('project.migrate'));
   });
 
+// マテリアル (M5-4) のころのプロジェクトを、マテリアルなしの描画に移す (確認してから。ファイルを書き換えるので)
+export const migrateMaterials = () =>
+  run(async () => {
+    const m = studioStore.get().project?.materialMigration;
+    if (!m || m.changes.length === 0) return;
+    const ok = window.confirm(
+      'このプロジェクトは、マテリアル (外した仕組み) を前提にした描画のファイルを使っています。\n' +
+        '次のファイルを、マテリアルなしの描画に書き換えます (自分で書き換えたファイルは触りません):\n\n' +
+        m.changes.map((c) => `・${c}`).join('\n') +
+        (m.manual.length ? '\n\n手で直すもの (書き換えません):\n' + m.manual.map((c) => `・${c}`).join('\n') : '') +
+        '\n\nmaterials/ のファイルとシーンの割り当ては残します (使いません)。\n書き換えますか？',
+    );
+    if (!ok) return;
+    const r = await call('project.migrateMaterials');
+    studioStore.setNotice(`マテリアルなしの描画に移しました (${r.written.length} ファイル)`);
+  });
+
 // ---- 編集 ----
 export const undoRedo = (undo: boolean) =>
   run(async () => {

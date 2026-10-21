@@ -15,9 +15,9 @@
 //  ・id はシーンの中で一意 (英数字と - _ .)。parent は親の id (null = 一番上)。循環はエラー
 //  ・rotation はオイラー角 (度)。X → Y → Z の順に回す (world = 親 × T × Rz × Ry × Rx × S)
 //  ・model は "builtin:cube" (立方体) か "asset:<ID>" (取り込んだモデル。ID は assets/ の .meta の id、M5-3)
-//  ・materials はスロットの名前 → マテリアルのファイル (M5-4)。書いていないスロットは、取り込んだ値 (モデルのスロットの
-//    基本色とテクスチャ) の標準のマテリアルで描く。立方体のスロットは "Default"
-//  ・color はマテリアルの色に掛ける色 (同じモデルを 1 体ずつ色違いにする)。M5-2 の layer は読み飛ばす
+//  ・materials はスロットの名前 → マテリアルのファイル (M5-4)。マテリアルの仕組みは 2026-10-22 に外したので、
+//    今は読み書きで保つだけ (描画には使わない。作り直すときのために残す)。立方体のスロットは "Default"
+//  ・color は物体の色 (シェーダーの gColor。同じモデルを 1 体ずつ色違いにする)。M5-2 の layer は読み飛ばす
 //  ・light があれば、その物体はライト (M5-5。モデルは描かない)。
 //      "light": { "type": "point", "params": { "color": [1, 1, 1], "intensity": 5 }, "links": ["hero"] }
 //    type は lights/<種類>.light.json の種類、params はその値 (書いていないものは既定値)、
@@ -73,7 +73,7 @@ struct SceneObject
 	std::array<float, 3> scale    { 1, 1, 1 };
 	bool                 visible  = true;
 	std::array<float, 4> color    { 1, 1, 1, 1 };   // マテリアルの色に掛ける
-	std::map<std::string, std::string> materials;   // スロット → マテリアルのファイル (書いていなければ取り込んだ値)
+	std::map<std::string, std::string> materials;   // スロット → マテリアルのファイル (M5-4 のもの。保つだけで使わない)
 	std::optional<SceneLight> light;                 // あればライト (M5-5)
 	bool                      castShadow = true;     // 影を落とす
 	std::optional<std::vector<std::string>> layers;  // 描画レイヤー (なければ既定)

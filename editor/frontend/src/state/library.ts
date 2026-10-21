@@ -90,3 +90,9 @@ export function modelObject(scene: SceneJson, asset: LibraryAsset, parent: strin
 export function assetKindLabel(importer: string): string {
   return importer === 'model' ? 'モデル' : importer === 'texture' ? 'テクスチャ' : importer;
 }
+
+// 物体のスロットの名前 (立方体は "Default"、モデルはライブラリのスロットの名前)。描画レイヤーのスロットごとの上書きに使う
+export function objectSlots(obj: SceneObjectJson, library: LibraryInfo | null): string[] {
+  if (obj.model === 'builtin:cube') return ['Default'];
+  return assetOfModel(library, obj.model)?.model?.info?.slotNames ?? [];
+}

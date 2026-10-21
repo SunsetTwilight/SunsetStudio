@@ -12,11 +12,8 @@ namespace studio
 {
 namespace
 {
-const char* k_CubeMaterial   = "auto:cube";
-const char* k_ShadowFallback = "auto:shadow";   // Shadow パスを持たないマテリアルの物体を、影に描くとき
-const char* k_ShadowPass     = "Shadow";        // 影のマテリアルパス (グラフの Shadow パスの drawList の layer)
-const char* k_StandardShadowPipeline = "pipelines/materials/standard.shadow.json";
-const char* k_GridLayer      = "Grid";          // エディターのグリッド (物体は描かない)
+const char* k_ShadowPass = "Shadow";   // 影のパスの drawList の layer (描画レイヤーによらず、影を落とす物体を描く)
+const char* k_GridLayer  = "Grid";     // エディターのグリッド (物体は描かない)
 
 // assets/shaders/common.hlsli の Frame と合わせる
 struct FrameConstants
@@ -69,6 +66,7 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 	m_root      = assetRoot;
 	m_graphFile = graphFile;
 	m_reportedPipelineErrors = m_reportedExecutorErrors = 0;
+	m_unboundReported.clear();
 	m_pipelines = std::make_unique<gfx::rg::PipelineLibrary>(engine, shaders);
 	m_pipelines->setRoot(assetRoot);
 	m_executor  = std::make_unique<gfx::rg::Executor>(engine, *m_pipelines);
@@ -123,16 +121,7 @@ bool ViewportRenderer::init(GraphicsEngine& engine, ShaderLibrary& shaders, cons
 		if (!m_unassignedOk)
 			m_viewerError += (m_viewerError.empty() ? "" : "\n") + overlayError;
 	}
-	// ---- マテリアル (M5-4)。立方体は白の標準のマテリアル (物体の色を掛ける) ----
 	m_engine = &engine;
-	m_materials.init(engine, shaders, *m_pipelines, assetRoot);
-	m_materials.setAuto(k_CubeMaterial, standardMaterial({ 1, 1, 1, 1 }, 0.0f, 0.6f));
-	{
-		MaterialDesc shadow;
-		shadow.passes[k_ShadowPass] = k_StandardShadowPipeline;
-		shadow.params = { { "baseColor", { 1.0, 1.0, 1.0, 1.0 } }, { "alphaCutoff", 0.0 } };
-		m_materials.setAuto(k_ShadowFallback, shadow);
-	}
 	// 物体はシーンのファイルから (setScene)
 	return true;
 }
@@ -156,7 +145,6 @@ void ViewportRenderer::shutdown(GraphicsEngine& engine)
 		releaseDraws(engine, o, 0);
 	m_objects.clear();
 	m_models.clear(engine);
-	m_materials.shutdown(engine);
 	m_lights.shutdown(engine);
 	m_engine = nullptr;
 	engine.destroyBuffer(m_vb);
@@ -182,11 +170,8 @@ ViewportRenderer::PollResult ViewportRenderer::pollAssets()
 		r.graphRecompiled = m_graph->recompile(m_options);
 		r.graphFailed     = m_graph->lastFailed();
 	}
-	// マテリアルのファイルの変更と、パイプラインが変わったときのリフレクションの調べ直し。ライトの種類の変更
-	m_materials.poll();
+	// ライトの種類の変更
 	m_lights.poll();
-	if (!pr.reloaded.empty())
-		m_materials.invalidateShaders();
 	if (r.graphReloaded || r.graphRecompiled || r.graphFailed)
 		r.graphMessages = m_graph->messages();
 	m_graph->clearStatus();
@@ -203,8 +188,6 @@ std::vector<std::string> ViewportRenderer::takeNewErrors()
 	}
 	if (!m_pipelines || !m_executor)
 		return out;
-	for (auto& e : m_materials.takeErrors())
-		out.push_back(std::move(e));
 	for (auto& e : m_lights.takeErrors())
 		out.push_back(std::move(e));
 	const auto& pe = m_pipelines->errors();
@@ -310,42 +293,17 @@ void ViewportRenderer::setScene(GraphicsEngine& engine, const SceneDesc& scene)
 	updateObjects(engine);
 }
 
-void ViewportRenderer::setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model,
-                                const std::vector<MaterialDesc>* slotMaterials)
+void ViewportRenderer::setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model)
 {
 	if (model)
 	{
 		std::string error;
 		if (!m_models.set(engine, id, *model, error))
 			m_viewerError += (m_viewerError.empty() ? "" : "\n") + error;
-		// スロットごとの取り込んだ値のマテリアル (割り当てていないスロットで使う)
-		for (size_t i = 0; i < model->slots.size(); ++i)
-		{
-			const MaterialDesc desc = slotMaterials && i < slotMaterials->size()
-				? (*slotMaterials)[i] : standardMaterial({ 1, 1, 1, 1 }, 0.0f, 0.6f);
-			m_materials.setAuto(autoMaterialKey(id, i), desc);
-		}
 	}
 	else
 		m_models.remove(engine, id);
 	updateObjects(engine);
-}
-
-std::string ViewportRenderer::autoMaterialKey(const std::string& modelId, size_t slot)
-{
-	return "auto:" + modelId + ":" + std::to_string(slot);
-}
-
-MaterialDesc ViewportRenderer::standardMaterial(const std::array<float, 4>& baseColor, float metallic, float roughness)
-{
-	// ファイルに書いたときに 0.949999988 のようにならないよう、6 桁に丸めて double で持つ
-	auto r = [](float v) { return std::round(static_cast<double>(v) * 1e6) / 1e6; };
-	MaterialDesc m;
-	m.passes[k_StandardMaterialPass] = k_StandardMaterialPipeline;
-	m.passes[k_ShadowPass]           = k_StandardShadowPipeline;
-	m.params = { { "baseColor", { r(baseColor[0]), r(baseColor[1]), r(baseColor[2]), r(baseColor[3]) } },
-	             { "metallic", r(metallic) }, { "roughness", r(roughness) }, { "alphaCutoff", 0.0 } };
-	return m;
 }
 
 void ViewportRenderer::releaseDraws(GraphicsEngine& engine, Object& o, size_t keep)
@@ -426,20 +384,11 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 			GfxFormat    format = GfxFormat::R32_Uint;
 			uint32_t     count = 0, offset = 0;
 			Mat4         world;
-			std::string  material;
 			std::vector<std::string> layers;
 		};
 		std::vector<Want> wants;
-		auto assigned = [&](const std::string& slot) -> std::string {
-			const auto it = so.materials.find(slot);
-			return it != so.materials.end() ? it->second : std::string();
-		};
 		if (so.model == "builtin:cube")
-		{
-			const std::string m = assigned("Default");
-			wants.push_back({ m_vb, m_ib, GfxFormat::R16_Uint, 36, 0, o.world, m.empty() ? std::string(k_CubeMaterial) : m,
-			                  drawLayersOf(so, "Default") });
-		}
+			wants.push_back({ m_vb, m_ib, GfxFormat::R16_Uint, 36, 0, o.world, drawLayersOf(so, "Default") });
 		else if (const auto modelId = assetIdOfModel(so.model))
 		{
 			if (const ModelCache::Gpu* gpu = m_models.find(*modelId))
@@ -448,10 +397,9 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 				for (const ModelCache::Draw& d : gpu->draws)
 				{
 					const std::string slot = d.slot < gpu->slotNames.size() ? gpu->slotNames[d.slot] : std::string();
-					const std::string m    = assigned(slot);
 					const ModelCache::Mesh& mesh = gpu->meshes[d.mesh];
 					wants.push_back({ mesh.vb, mesh.ib, GfxFormat::R32_Uint, d.indexCount, d.indexOffset, o.world * d.node,
-					                  m.empty() ? autoMaterialKey(*modelId, d.slot) : m, drawLayersOf(so, slot) });
+					                  drawLayersOf(so, slot) });
 				}
 			}
 		}
@@ -466,7 +414,6 @@ void ViewportRenderer::updateObjects(GraphicsEngine& engine)
 			d.indexFormat = w.format;
 			d.indexCount  = w.count;
 			d.indexOffset = w.offset;
-			d.material    = w.material;
 			d.layers      = w.layers;
 			d.world       = w.world;
 			if (!d.cb.valid())
@@ -576,71 +523,60 @@ void ViewportRenderer::draw(const gfx::rg::DrawListQuery& query, const gfx::rg::
 	}
 	if (!m_engine)
 		return;
-	// layer = マテリアルパス (M5-4)。物体 (スロット) の描画レイヤーにこの layer があるメッシュを描く (マテリアルの順に並べる)。
-	// マテリアルがこのパスのパイプラインを持てばそれ、なければノードのパイプラインで描く。
-	// 影のパス: 描画レイヤーによらず、影を落とす物体だけ。マテリアルが Shadow パスを持たなければ、標準の影のパイプライン
-	const std::string& pass = query.layer;
-	const bool shadowPass = pass == k_ShadowPass;
+	// 物体 (スロット) の描画レイヤーにこの layer があるメッシュを、パスのパイプラインで描く
+	// (パイプラインとフレームなどの定数は Executor がつないでいる。ここでは物体の定数と頂点 / インデックスだけ)。
+	// 影のパス: 描画レイヤーによらず、影を落とす物体だけ
+	const std::string& layer = query.layer;
+	const bool shadowPass = layer == k_ShadowPass;
 	if (shadowPass && !m_shadowActive)
 		return;   // 影を落とすライトがない
-	const BufferHandle frameCB = ctx.view() == "shadow" ? m_shadowFrameCB : m_frameCB;
-	struct Item { const DrawItem* d; const std::string* material; };
-	static const std::string shadowFallback = k_ShadowFallback;
-	std::vector<Item> items;
-	for (const Object& o : m_objects)
-		if (o.visible && (!shadowPass || o.castShadow))
-			for (const DrawItem& d : o.draws)
-			{
-				if (shadowPass)
-					items.push_back({ &d, m_materials.hasPass(d.material, pass) ? &d.material : &shadowFallback });
-				else if (std::find(d.layers.begin(), d.layers.end(), pass) != d.layers.end())
-					items.push_back({ &d, &d.material });
-			}
-	std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return *a.material < *b.material; });
-
-	const std::string*    current = nullptr;
-	MaterialSystem::Bound bound;
-	bool                  ok = false;
-	uint64_t              lastVb = 0, lastIb = 0;
-	for (const Item& it : items)
+	// パイプラインのルートパラメーターで、パス (定数 / 入出力の bind) がつないでいないものがあれば描かない。
+	// つながないまま描くと、GPU が初期化していない値を読む (マテリアルのころのパイプラインの b2 / t0 など)
+	if (const GfxBindingLayoutDesc* bl = m_pipelines->bindingLayout(ctx.pass->desc.pipeline))
 	{
-		const DrawItem* d = it.d;
-		if (!current || *current != *it.material)
-		{
-			current = it.material;
-			ok = m_materials.prepare(*m_engine, *it.material, pass, ctx.targets, bound,
-			                         shadowPass ? std::string() : ctx.pass->desc.pipeline);
-			if (!ok)
-				continue;
-			// パイプラインを替えるとルートシグネチャも替わるので、バインドはすべて設定し直す
-			ctx.cb->bindPipeline(bound.pipeline);
-			if (bound.numParams > k_MaterialParamFrame)
-				ctx.cb->setRootDescriptor(k_MaterialParamFrame, frameCB, 0);
-			if (bound.constants.valid() && bound.numParams > k_MaterialParamMaterial)
-				ctx.cb->setRootDescriptor(k_MaterialParamMaterial, bound.constants, 0);
-			if (!bound.textures.empty() && bound.numParams > k_MaterialParamTextures)
-				ctx.cb->setDescriptorTable(k_MaterialParamTextures, bound.textures.data(), static_cast<uint32_t>(bound.textures.size()));
-			lastVb = lastIb = 0;
-		}
-		if (!ok)
+		std::vector<bool> bound(bl->numParameters, false);
+		auto mark = [&](int32_t p) { if (p >= 0 && p < static_cast<int32_t>(bound.size())) bound[static_cast<size_t>(p)] = true; };
+		for (const auto& c : ctx.pass->desc.constants) mark(c.bind.param);
+		for (const auto& r : ctx.pass->desc.inputs)    mark(r.bind.param);
+		for (const auto& r : ctx.pass->desc.outputs)   mark(r.bind.param);
+		for (uint32_t i = 0; i < bl->numParameters; ++i)
+			if (!bound[i])
+			{
+				if (m_unboundReported.insert(ctx.pass->desc.pipeline + "#" + std::to_string(i)).second)
+					m_viewerError += (m_viewerError.empty() ? "" : "\n") + std::string("パス ") + ctx.pass->name + " のパイプライン " +
+					                 ctx.pass->desc.pipeline + " のルートパラメーター " + std::to_string(i) +
+					                 " をつないでいないので、メッシュを描きません (マテリアルのころのパイプラインなら、ファイル > マテリアルなしの描画に移す)";
+				return;
+			}
+	}
+	const int32_t objectParam = ctx.paramOf("object");
+	uint64_t lastVb = 0, lastIb = 0;
+	for (const Object& o : m_objects)
+	{
+		if (!o.visible || (shadowPass && !o.castShadow))
 			continue;
-		if (d->vb.id != lastVb)
+		for (const DrawItem& d : o.draws)
 		{
-			const GfxVertexBufferBinding vb{ d->vb, 0, 0, sizeof(MeshVertex) };
-			ctx.cb->setVertexBuffers(0, 1, &vb);
-			lastVb = d->vb.id;
+			if (!shadowPass && std::find(d.layers.begin(), d.layers.end(), layer) == d.layers.end())
+				continue;
+			if (d.vb.id != lastVb)
+			{
+				const GfxVertexBufferBinding vb{ d.vb, 0, 0, sizeof(MeshVertex) };
+				ctx.cb->setVertexBuffers(0, 1, &vb);
+				lastVb = d.vb.id;
+			}
+			if (d.ib.id != lastIb)
+			{
+				GfxIndexBufferBinding ib;
+				ib.buffer = d.ib;
+				ib.format = d.indexFormat;
+				ctx.cb->setIndexBuffer(ib);
+				lastIb = d.ib.id;
+			}
+			if (objectParam >= 0)
+				ctx.cb->setRootDescriptor(static_cast<uint32_t>(objectParam), d.cb, 0);
+			ctx.cb->drawIndexedInstanced(d.indexCount, 1, d.indexOffset, 0, 0);
 		}
-		if (d->ib.id != lastIb)
-		{
-			GfxIndexBufferBinding ib;
-			ib.buffer = d->ib;
-			ib.format = d->indexFormat;
-			ctx.cb->setIndexBuffer(ib);
-			lastIb = d->ib.id;
-		}
-		if (bound.numParams > k_MaterialParamObject)
-			ctx.cb->setRootDescriptor(k_MaterialParamObject, d->cb, 0);
-		ctx.cb->drawIndexedInstanced(d->indexCount, 1, d->indexOffset, 0, 0);
 	}
 }
 

@@ -35,7 +35,6 @@ export interface StudioState {
   library: LibraryInfo | null; // アセットのライブラリ (M5-3)
   windowMaximized: boolean; // メインのウィンドウが最大化しているか (タイトルバーのボタン)
   commandError: string; // メニューの操作の失敗 (タイトルバーに出す)
-  materialFiles: string[]; // materials/*.material.json (M5-4)
   lightTypes: LightTypeInfo[]; // lights/*.light.json (M5-5)
 }
 
@@ -47,7 +46,7 @@ export interface PipelineShaders {
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, unsaved: null, closePrompt: null, notice: '', shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, windowMaximized: false, commandError: '', materialFiles: [], lightTypes: [] };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, unsaved: null, closePrompt: null, notice: '', shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, windowMaximized: false, commandError: '', lightTypes: [] };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -93,14 +92,13 @@ export const studioStore = {
   setLibrary: (library: LibraryInfo | null) => set({ library }),
   setWindowMaximized: (windowMaximized: boolean) => set({ windowMaximized }),
   setCommandError: (commandError: string) => set({ commandError }),
-  setMaterialFiles: (materialFiles: string[]) => set({ materialFiles }),
   setLightTypes: (lightTypes: LightTypeInfo[]) => set({ lightTypes }),
   // プロジェクトが変わったら、前のプロジェクトのグラフと選択と統計は捨てる
   setProject: (project: ProjectInfo) =>
     set(
       state.project?.file === project.file && state.project?.open === project.open
         ? { project }
-        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, materialFiles: [], lightTypes: [] },
+        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, lightTypes: [] },
     ),
 };
 

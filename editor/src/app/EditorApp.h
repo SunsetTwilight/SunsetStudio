@@ -22,7 +22,7 @@
 //             window.devTools                                                  (UI が描くタイトルバー)
 //             asset.list / asset.read / asset.write / asset.templates / asset.create / asset.openExternal /
 //             shader.compile / shader.usages / shader.status                   (シェーダー / パイプラインの編集、M4)
-//             material.list / material.describe / material.set / material.create / light.types (M5-4 / M5-5)
+//             light.types / project.migrateMaterials                             (M5-5 / マテリアルを外した移行)
 //             library.list / library.import / library.refresh / library.reimport / library.load
 //                                                                              (アセットのライブラリ、M5-3)
 //  イベント:  log (エンジンとアプリのメッセージ) / engine.status (エンジンの初期化の結果) /
@@ -39,7 +39,6 @@
 
 #include "host/WebHost.h"
 #include "services/BackgroundQueue.h"
-#include "services/Material.h"
 #include "services/ProjectAssets.h"
 #include "services/Project.h"
 #include "services/Scene.h"
@@ -108,12 +107,10 @@ private:
 	void requestModel(const std::string& id);         // 別のスレッドで取り込んで読み、描画スレッドに渡す
 	void onModelLoaded(uint64_t generation, const std::string& id, uint64_t ticket,
 	                   std::shared_ptr<const sunset::asset::Model> model, const sunset::asset::Diagnostics& diag, double ms);
-	void requestTexture(const std::string& id);      // マテリアルが使うテクスチャを別のスレッドで読み、描画スレッドに渡す (M5-4)
 	// スロットの取り込んだ値 (基本色、金属度、粗さ、テクスチャ) で作る標準のマテリアル
-	std::vector<MaterialDesc> slotMaterials(const std::string& modelId, const sunset::asset::Model& model) const;
-	void registerMaterialMethods();   // EditorMaterials.cpp
-	void ensureMaterialSupport(const Project& project);
-	bool writeMaterialFile(const std::string& path, const Json& material, bool create, std::string& error);   // 標準のマテリアルのファイルがなければ、テンプレートから足す
+	void registerProjectFileMethods();   // EditorProjectFiles.cpp
+	void ensureProjectSupport(const Project& project);   // ライトの種類と common.hlsli がなければ、テンプレートから足す
+	Json materialMigrationJson() const;                  // マテリアルのころのプロジェクトの移行 (なければ null)
 	Json sceneInfoJson() const;
 	void emitSceneChanged();
 	void pushSceneToRenderer();
@@ -227,7 +224,7 @@ private:
 	std::vector<std::string> m_unsavedPipelines;
 	bool                     m_unsavedBusy  = false;
 	bool                     m_unsavedAgain = false;
-	bool                     m_closeConfirmed = false;   // 閉じるときの確認に答えた (保存した / 破棄した)   // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ。UI スレッド)
+	bool                     m_closeConfirmed = false;   // 閉じるときの確認に答えた (保存した / 破棄した)
 	// アセットのライブラリ (UI スレッドだけが触る。取り込みは m_libraryWorker で)
 	ProjectAssets   m_library;
 	uint64_t        m_libraryGeneration = 0;   // プロジェクトを開き直したら上げる (前のプロジェクトの結果を捨てる)
@@ -237,15 +234,8 @@ private:
 		std::string error;
 		Json        info;     // ノード / メッシュ / 頂点 / 三角形 / スロットの数
 		uint64_t    ticket = 0;
-		std::vector<MaterialDesc> slotMaterials;   // スロットごとの取り込んだ値のマテリアル (M5-4)
 	};
 	std::map<std::string, ModelState> m_modelStates;
-	struct TextureState
-	{
-		std::string status;   // "loading" / "ready" / "error"
-		uint64_t    ticket = 0;
-	};
-	std::map<std::string, TextureState> m_textureStates;
 	struct { int x = 0, y = 0, w = 0, h = 0; bool visible = false; } m_viewportWebRect;   // Web のパネルの矩形 (戻すときに使う)
 	int      m_exitCode      = 0;
 	BackgroundQueue m_libraryWorker;   // 最後に置く (先に止まる)。run の終わりでも止める

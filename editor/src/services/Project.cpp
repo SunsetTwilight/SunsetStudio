@@ -269,7 +269,7 @@ bool migrateProjectLayout(Project& project, std::vector<std::string>& moved, std
 	fs::remove(src, ec);   // 空になった Assets/ (Windows では assets/ と同じ名前になるので、先に消す)
 	if (ec)
 		return error = "Assets/ を消せません (中身は移しました): " + ec.message(), false;
-	for (const char* d : { "scenes", "graphs", "materials", "lights", "pipelines", "shaders", "assets" })
+	for (const char* d : { "scenes", "graphs", "lights", "pipelines", "shaders", "assets" })
 		fs::create_directories(dst / d, ec);
 
 	ProjectDesc next = project.desc;
@@ -344,7 +344,7 @@ bool createProject(const fs::path& parentDir, const std::string& name, const fs:
 		error = "テンプレートをコピーできません: " + ec.message();
 		return false;
 	}
-	for (const char* d : { "scenes", "graphs", "materials", "lights", "pipelines", "shaders", "assets" })
+	for (const char* d : { "scenes", "graphs", "lights", "pipelines", "shaders", "assets" })
 		fs::create_directories(dir / d, ec);
 	if (!writeTextAtomic(dir / ".gitignore", k_GitIgnore, error))
 		return false;

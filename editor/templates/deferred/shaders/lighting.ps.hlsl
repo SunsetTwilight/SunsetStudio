@@ -43,7 +43,7 @@ float4 main(PSIn i) : SV_Target
 	if (depth >= 1.0)
 		return float4(srgbToLinear(float3(0.075, 0.078, 0.088)), 1);   // 背景
 
-	// G-Buffer: gbAlbedo の a = 金属度、gbNormal の w = 粗さ (標準のマテリアル。shaders/materials/standard.gbuffer.ps.hlsl)
+	// G-Buffer: gbAlbedo の a = 金属度、gbNormal の w = 粗さ (shaders/gbuffer.ps.hlsl が書く)
 	const float4 ga        = gAlbedo.Load(p);
 	const float4 gn        = gNormal.Load(p);
 	const float3 albedo    = ga.rgb;

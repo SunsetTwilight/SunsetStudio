@@ -3,7 +3,7 @@
 // ============================================================
 import { describe, expect, it } from 'vitest';
 import type { LibraryAsset, LibraryInfo, SceneJson } from '../bridge/protocol';
-import { assetName, assetOfModel, idPrefix, modelObject, modelRef } from './library';
+import { assetName, assetOfModel, idPrefix, modelObject, modelRef, objectSlots } from './library';
 
 const asset = (id: string, path: string, extra: Partial<LibraryAsset> = {}): LibraryAsset => ({
   id,
@@ -48,5 +48,23 @@ describe('アセットのライブラリ', () => {
     expect(assetOfModel(lib, modelRef(a))).toBe(a);
     expect(assetOfModel(lib, 'builtin:cube')).toBeUndefined();
     expect(assetOfModel(null, modelRef(a))).toBeUndefined();
+  });
+});
+
+describe('物体のスロット', () => {
+  const ID2 = '0123456789abcdef0123456789abcdef';
+  const obj = (id: string, model = 'builtin:cube') => ({
+    id, name: id, model, parent: null, position: [0, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number],
+    scale: [1, 1, 1] as [number, number, number], visible: true, color: [1, 1, 1, 1] as [number, number, number, number],
+  });
+  const lib = {
+    extensions: [],
+    assets: [{ id: ID2, path: 'hero/hero.fbx', importer: 'model', external: false, missing: false, cached: true,
+      model: { status: 'ready', info: { nodes: 1, meshes: 1, vertices: 3, triangles: 1, slots: 2, skins: 0, morphs: 0, boundsMin: [0, 0, 0], boundsMax: [1, 1, 1], loadMs: 1, slotNames: ['Body', 'Hair'] } } }],
+  } as unknown as LibraryInfo;
+  it('立方体は Default、モデルはライブラリのスロットの名前', () => {
+    expect(objectSlots(obj('c'), lib)).toEqual(['Default']);
+    expect(objectSlots(obj('m', `asset:${ID2}`), lib)).toEqual(['Body', 'Hair']);
+    expect(objectSlots(obj('x', 'asset:ffffffffffffffffffffffffffffffff'), lib)).toEqual([]);
   });
 });

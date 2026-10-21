@@ -9,7 +9,7 @@
     "sceneColor": { "format": "R16G16B16A16_Float", "size": { "relative": 1.0 } }
   },
   "passes": [
-    { "name": "Shadow", "type": "Raster", "pipeline": "pipelines/materials/standard.shadow.json", "view": "shadow",
+    { "name": "Shadow", "type": "Raster", "pipeline": "pipelines/shadow.json", "view": "shadow",
       "constants": [ { "source": "object", "bind": { "param": 0 } },
                      { "source": "frame",  "bind": { "param": 1 } } ],
       "outputs": [ { "res": "shadowMap", "as": "DSV", "load": "clear" } ],

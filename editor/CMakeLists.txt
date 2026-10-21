@@ -37,8 +37,8 @@ add_library(studio_services STATIC
     src/services/Scene.cpp
     src/services/ProjectAssets.h      # アセットのライブラリ (assets/ と Cache/assets/。SunsetAsset、M5-3)
     src/services/ProjectAssets.cpp
-    src/services/Material.h           # マテリアルのファイルと、パラメーターの詰め方 (M5-4)
-    src/services/Material.cpp
+    src/services/MaterialMigration.h  # マテリアル (M5-4) を外したときの、既存のプロジェクトの移行
+    src/services/MaterialMigration.cpp
     src/services/LightTypes.h         # ライトの種類 (定義、値の詰め方、hlsli の生成。M5-5)
     src/services/LightTypes.cpp
 )
@@ -59,7 +59,7 @@ add_executable(SunsetEditor
     src/app/EditorScene.cpp
     src/app/EditorSave.cpp
     src/app/EditorLibrary.cpp
-    src/app/EditorMaterials.cpp
+    src/app/EditorProjectFiles.cpp
     src/host/WebHost.h
     src/host/WebHost.cpp
     src/host/FileDialog.h
@@ -79,8 +79,6 @@ add_executable(SunsetEditor
     src/render/UnassignedOverlay.cpp
     src/render/ModelCache.h
     src/render/ModelCache.cpp
-    src/render/MaterialSystem.h
-    src/render/MaterialSystem.cpp
     src/render/LightSystem.h
     src/render/LightSystem.cpp
     src/viewport/ViewportWindow.h

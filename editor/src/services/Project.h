@@ -9,7 +9,7 @@
 //    MyWork/
 //    ├── MyWork.sunsetproj      { "version": 2, "name": ..., "engine": ...,
 //    │                            "viewport": { "graph": "graphs/viewport.json", "scene": "scenes/main.scene.json" } }
-//    ├── scenes/ graphs/ materials/ lights/ pipelines/ shaders/   種類ごとのアセット
+//    ├── scenes/ graphs/ lights/ pipelines/ shaders/   種類ごとのアセット
 //    ├── assets/                モデルとテクスチャ (中は自由に整理する)
 //    ├── Saved/                 エディターが作るもの (パネルの配置など。git で管理しない)
 //    └── Cache/                 作り直せるもの (変換したモデルなど。git で管理しない)

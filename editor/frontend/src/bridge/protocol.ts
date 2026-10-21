@@ -155,6 +155,8 @@ export interface ProjectInfo {
   engine?: string;
   graph?: string;
   legacyLayout?: boolean; // 古い構成 (Assets/ の下)。project.migrate で直下に並べる構成に移せる
+  // マテリアル (M5-4) のころのプロジェクト: 移すもの (changes) と、手で直すもの (manual)。project.migrateMaterials で移す
+  materialMigration?: { changes: string[]; manual: string[] } | null;
   scene?: string; // ビューポートのシーン (アセットのパス)
 }
 
@@ -169,7 +171,7 @@ export interface SceneObjectJson {
   scale: [number, number, number];
   visible: boolean;
   color: [number, number, number, number]; // マテリアルの色に掛ける色
-  materials?: Record<string, string>; // スロット → マテリアルのファイル (書いていないスロットは取り込んだ値。M5-4)
+  materials?: Record<string, string>; // M5-4 のマテリアルの割り当て (2026-10-22 に外した。読み書きで保つだけ)
   light?: SceneLightJson; // あればライト (モデルは描かない。M5-5)
   castShadow?: boolean; // false なら影を落とさない (書いていなければ落とす)
   layers?: string[]; // 描画レイヤー (drawList の layer)。書いていなければ "Opaque"、空 = どこにも描かない
@@ -228,45 +230,9 @@ export interface LibraryModelInfo {
   boundsMin: [number, number, number];
   boundsMax: [number, number, number];
   loadMs: number;
-  slotNames: string[]; // マテリアルのスロットの名前 (シーンの materials のキー)
+  slotNames: string[]; // スロットの名前 (描画レイヤーのスロットごとの上書きのキー)
 }
 
-// マテリアル (M5-4): materials/*.material.json
-export interface MaterialJson {
-  version: number;
-  passes: Record<string, string>; // マテリアルパス (drawList の layer) → パイプライン
-  params: Record<string, JsonValue>; // cbuffer Material の変数 → 値
-  textures: Record<string, string>; // テクスチャの変数 → "asset:<ID>"
-}
-export interface MaterialVar {
-  name: string;
-  type: 'float' | 'int' | 'uint' | 'bool';
-  rows: number;
-  columns: number;
-  elements: number;
-  offset: number;
-}
-export interface MaterialTextureVar {
-  name: string;
-  slot: number;
-  srgb: boolean;
-  default: 'white' | 'flatNormal';
-}
-export interface MaterialPassInfo {
-  pipeline: string;
-  ok: boolean;
-  error?: string;
-  cbuffer: MaterialVar[];
-  textures: MaterialTextureVar[];
-}
-export interface MaterialInfo {
-  key: string;
-  ok: boolean;
-  auto: boolean; // 取り込んだ値のマテリアル (ファイルではない)
-  error?: string;
-  material?: MaterialJson;
-  passes?: Record<string, MaterialPassInfo>;
-}
 export interface LibraryModelState {
   status: 'loading' | 'ready' | 'error';
   error?: string;
@@ -401,6 +367,7 @@ export interface Methods {
     result: { id: string; desc: JsonObject; warnings: string[] };
   };
   'pipeline.save': { params: { id: string }; result: { id: string } };
+  'project.migrateMaterials': { params: Record<string, never>; result: { written: string[]; manual: string[] } };
   'project.unsaved': { params: Record<string, never>; result: Unsaved };
   'project.saveAll': { params: Record<string, never>; result: { saved: string[] } };
   'app.closeAnswer': { params: { action: 'save' | 'discard' | 'cancel' }; result: { closing: boolean } };
@@ -428,11 +395,7 @@ export interface Methods {
   'library.refresh': { params: Record<string, never>; result: { created: number; reIded: number; reloaded: string[] } };
   'library.reimport': { params: { id: string }; result: { id: string } };
   'library.load': { params: { id: string }; result: { id: string; status: string } };
-  'material.list': { params: Record<string, never>; result: { files: string[] } };
   'light.types': { params: Record<string, never>; result: { types: LightTypeInfo[] } };
-  'material.describe': { params: { key: string }; result: MaterialInfo };
-  'material.set': { params: { path: string; material: MaterialJson; label?: string }; result: { path: string } };
-  'material.create': { params: { path: string; material?: MaterialJson }; result: { path: string } };
   'window.minimize': { params: Record<string, never>; result: { maximized: boolean } };
   'window.toggleMaximize': { params: Record<string, never>; result: { maximized: boolean } };
   'window.close': { params: Record<string, never>; result: Record<string, never> };
@@ -493,5 +456,4 @@ export interface Events {
   'scene.picked': { id: string };
   'library.changed': Record<string, never>;
   'window.state': { maximized: boolean };
-  'material.changed': { path: string };
 }

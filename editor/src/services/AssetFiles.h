@@ -45,4 +45,12 @@ const AssetTemplate*              findAssetTemplate(const std::string& id);
 // テンプレートの中身。パイプラインのテンプレートでは shader に PS (Compute なら CS) のアセットのパスを入れる。
 // 描画ノードのパイプライン ("pipeline.draw") は vs に VS のパスも入れる。テンプレートがなければ false
 bool assetTemplateText(const std::string& id, const std::string& shader, std::string& out, const std::string& vs = {});
+
+// ---- マテリアルを外したときの移行 (2026-10-22) ----
+// M5-4 (マテリアル) のころの描画ノードの既定のファイル。中身がこれと同じなら、書き換えていないとみなして置き換える
+const std::string& legacyDrawPixelShader();
+std::string        legacyDrawPipeline(const std::string& vs, const std::string& ps, bool depth);
+// 今の描画ノードの既定のファイル
+const std::string& drawPixelShader();
+std::string        drawPipelineText(const std::string& vs, const std::string& ps, bool depth);
 } // namespace studio

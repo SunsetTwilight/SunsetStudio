@@ -17,7 +17,6 @@
 // ============================================================
 
 #include "LightSystem.h"
-#include "MaterialSystem.h"
 #include "ModelCache.h"
 #include "OrbitCamera.h"
 #include "ResourceViewer.h"
@@ -33,6 +32,7 @@
 #include <array>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -70,15 +70,9 @@ public:
 
 	// シーンの物体を置き換える (M5-2)。asset:<ID> のモデルは setModel で届いてから描く。届くまでは何も描かない
 	void setScene(GraphicsEngine& engine, const SceneDesc& scene);
-	// 取り込んだモデルを入れる / 入れ替える (M5-3)。model が nullptr なら外す。
-	// slotMaterials はスロットごとの取り込んだ値のマテリアル (割り当てていないスロットで使う。M5-4)
-	void setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model,
-	              const std::vector<MaterialDesc>* slotMaterials = nullptr);
-	MaterialSystem& materials() { return m_materials; }
-	LightSystem&    lights()    { return m_lights; }
-	// 取り込んだ値のマテリアルのキー
-	static std::string  autoMaterialKey(const std::string& modelId, size_t slot);
-	static MaterialDesc standardMaterial(const std::array<float, 4>& baseColor, float metallic, float roughness);
+	// 取り込んだモデルを入れる / 入れ替える (M5-3)。model が nullptr なら外す
+	void setModel(GraphicsEngine& engine, const std::string& id, const sunset::asset::Model* model);
+	LightSystem& lights() { return m_lights; }
 	// 選んでいる物体 (空なら選んでいない)。render で辺の印を描く
 	void setSelection(const std::string& id) { m_selection = id; }
 	// ビューポートのピクセル (x, y) の下の物体の id (なければ空)
@@ -113,7 +107,6 @@ private:
 		uint32_t     indexCount  = 0;
 		uint32_t     indexOffset = 0;
 		BufferHandle cb;          // ワールド行列と色 (common.hlsli の Object)
-		std::string  material;    // マテリアルのキー (ファイルのパス / "auto:…")
 		std::vector<std::string> layers;   // 描くレイヤー (Scene の drawLayersOf)
 		Mat4         world;       // どこにも描かれないときの印に使う
 	};
@@ -149,7 +142,6 @@ private:
 	BufferHandle        m_vb, m_ib, m_frameCB;
 	std::vector<Object> m_objects;
 	ModelCache          m_models;
-	MaterialSystem      m_materials;
 	LightSystem         m_lights;
 	Float3              m_sunDirection { -0.396f, -0.880f, -0.264f };   // フレームの gLightDir (最初の平行光源。古いシェーダー用)
 	// 影 (平行光源 1 つ、シーン全体に 1 枚): パスの view が "shadow" のとき、フレームの定数を光の視点にする
@@ -157,6 +149,7 @@ private:
 	Mat4                m_shadowViewProj = Mat4::identity();
 	BufferHandle        m_shadowFrameCB;
 	GraphicsEngine*     m_engine = nullptr;   // draw の中で使う (init から shutdown まで)
+	std::set<std::string> m_unboundReported;  // つないでいないルートパラメーターを知らせたもの (パイプライン#番号)
 	size_t              m_reportedPipelineErrors = 0;
 	size_t              m_reportedExecutorErrors = 0;
 };
