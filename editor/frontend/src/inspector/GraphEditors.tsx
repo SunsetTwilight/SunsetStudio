@@ -9,10 +9,10 @@
 import { useEffect, useState } from 'react';
 import { call } from '../bridge/client';
 import type { GraphInfo, JsonObject, JsonValue } from '../bridge/protocol';
-import { applyGraph, asArray, asObject, findPass, resourceNames, withPass, withResource } from '../state/graph';
+import { applyGraph, asArray, asObject, findPass, resourceNames, withPass, withResource, applyInputGraph } from '../state/graph';
 import { studioStore } from '../state/store';
 import { showInViewer } from '../panels/ViewerPanel';
-import { renamePass, renameResource } from '../nodegraph/model';
+import { renamePass, renameResource, addInput, addOutput } from '../nodegraph/model';
 
 // 名前の欄 (Enter かフォーカスを外したときに確定する)
 export function NameBox({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
@@ -112,9 +112,16 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
     const setRef = (i: number, ref: JsonObject, what: string) =>
       update((p) => ({ ...p, [key]: refs.map((r, k) => (k === i ? ref : r)) }), what);
     const removeRef = (i: number) => update((p) => ({ ...p, [key]: refs.filter((_, k) => k !== i) }), `${key}[${i}] を削除`);
+    // 出力は新しいテクスチャを空いている RTV / UAV で、入力はまだ読んでいないテクスチャを空いている bind で加える
     const addRef = () => {
-      const fresh: JsonObject = key === 'inputs' ? { res: names[0] ?? '', as: 'SRV', bind: { param: 0, offset: 0 } } : { res: names[0] ?? '', as: 'RTV0', load: 'clear' };
-      update((p) => ({ ...p, [key]: [...refs, fresh] }), `${key} に追加`);
+      const r = key === 'inputs' ? addInput(g, name) : addOutput(g, name);
+      if ('error' in r) return void setRenameError(r.error);
+      setRenameError('');
+      if (key === 'outputs') return void apply(r.graph, r.label);
+      // 入力: パイプラインのテーブルが足りなければ広げてから送る (シェーダーで使うには Texture2D の宣言が要る)
+      void applyInputGraph(r.graph, name, r.label).then((err) =>
+        setRenameError(err ?? ''),
+      );
     };
     return (
       <div className="ref-table">

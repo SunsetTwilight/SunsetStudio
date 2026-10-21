@@ -393,6 +393,7 @@ export interface Methods {
     result: { id: string; desc: JsonObject; warnings: string[] };
   };
   'pipeline.save': { params: { id: string }; result: { id: string } };
+  'pipeline.growTable': { params: { id: string; param: number; size: number; label?: string }; result: { grown: boolean; size: number } };
   'graph.get': { params: Record<string, never>; result: GraphInfo };
   'graph.set': { params: { graph: JsonObject; label?: string }; result: GraphInfo };
   'edit.state': { params: Record<string, never>; result: EditState };

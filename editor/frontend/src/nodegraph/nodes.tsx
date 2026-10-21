@@ -94,7 +94,7 @@ export function PassNode({ data, selected }: NodeProps & { data: PassFlowData })
           <span className="rf-in" title="リソースの右 (読む) からここへつなぐと、入力を加える">
             <Handle type="target" position={Position.Left} id="in:new" className="rf-handle new" />+ 入力
           </span>
-          <span className="rf-out" title="ここからリソースの左 (書く) へつなぐと、出力を加える">
+          <span className="rf-out" title="ここからリソースの左 (書く) へつなぐと、出力を加える。何もない所で離すと、そこに新しいテクスチャを作って出力にする">
             出力 +
             <Handle type="source" position={Position.Right} id="out:new" className="rf-handle new" />
           </span>

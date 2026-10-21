@@ -7,7 +7,7 @@
 //
 //  メソッド:  ui.ready / app.info / app.ping / viewport.setRect /
 //             schema.types / schema.describe /
-//             pipeline.list / pipeline.get / pipeline.update / pipeline.save   (パイプラインのアセット)
+//             pipeline.list / pipeline.get / pipeline.update / pipeline.growTable / pipeline.save   (パイプラインのアセット)
 //             graph.get / graph.set / graph.save                               (ビューポートのレンダーグラフ)
 //             project.info / project.recent / project.templates / project.open / project.create / project.close /
 //             project.layout.get / project.layout.set / dialog.openProject / dialog.pickFolder   (プロジェクト、M4a)

@@ -2,6 +2,7 @@
 //  ビューポートのレンダーグラフの読み込みと編集
 //
 //    loadGraph()        graph.get の結果をストアに入れる (起動時と graph.changed のとき)
+//    applyInputGraph()  入力を加えたグラフを送る。bind がパイプラインのテーブルの範囲外なら、先にテーブルを広げる
 //    applyGraph(json)   グラフ全体の JSON を graph.set で送る。コンパイルできなければエラーで、
 //                       エディター側は前のグラフのまま (ストアも変えない)
 //  グラフの JSON の形はエンジンの graphToJson と同じ (resources はオブジェクト、passes は配列)。
@@ -26,6 +27,28 @@ export async function applyGraph(next: JsonObject, label?: string): Promise<stri
   } catch (e) {
     return errorText(e);
   }
+}
+
+// パス passName の入力 inputIndex を加えたグラフ next を送る。その入力の bind (SRV) が、パスのパイプラインの
+// 記述子テーブルより先なら、先に pipeline.growTable でテーブルを広げる (履歴は「広げる」と「グラフ」の 2 つになる)
+export async function applyInputGraph(next: JsonObject, passName: string, label: string): Promise<string | null> {
+  const pass = findPass(next, passName);
+  const inputs = asArray(pass?.inputs).map(asObject);
+  const bind = asObject(inputs[inputs.length - 1]?.bind);
+  const pipeline = String(pass?.pipeline ?? '');
+  if (pipeline && typeof bind.param === 'number') {
+    try {
+      await call('pipeline.growTable', {
+        id: pipeline,
+        param: bind.param,
+        size: Number(bind.offset ?? 0) + 1,
+        label: `${pipeline} のテーブルを広げる (${passName} の入力)`,
+      });
+    } catch (e) {
+      return errorText(e);
+    }
+  }
+  return applyGraph(next, label);
 }
 
 export function asObject(v: JsonValue | undefined): JsonObject {

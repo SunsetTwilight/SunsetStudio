@@ -6,6 +6,8 @@ import type { JsonObject } from '../bridge/protocol';
 import { asArray, asObject, passesOf } from '../state/graph';
 import {
   addDrawPass,
+  addInput,
+  addOutput,
   addPass,
   addResource,
   autoLayout,
@@ -223,5 +225,49 @@ describe('ノードの結果の表示', () => {
     const b = addResource(graph, 'buffer', [0, 0]);
     expect(previewTargets(b.graph, `res:${b.name}`)).toEqual([]);
     expect(previewTargets(graph, 'pass:None')).toEqual([]);
+  });
+});
+
+describe('出力 / 入力の追加', () => {
+  it('出力は新しいテクスチャを空いている RTV で書く (フォーマットは今の RTV に合わせる)', () => {
+    const r = addOutput(graph, 'GBuffer', [10, 20]);
+    if ('error' in r) throw new Error(r.error);
+    expect(r.resource).toBe('GBufferOut');
+    expect(asObject(r.graph.resources).GBufferOut).toEqual({ format: 'R8G8B8A8_Unorm', size: { relative: 1 } });
+    expect(refs(r.graph, 'GBuffer', 'outputs')[3]).toEqual({ res: 'GBufferOut', as: 'RTV2', load: 'clear' });
+    expect(savedPositions(r.graph)['res:GBufferOut']).toEqual([10, 20]);
+    // Lighting は RTV0 に R16G16B16A16_Float を書いている
+    const l = addOutput(graph, 'Lighting');
+    if ('error' in l) throw new Error(l.error);
+    expect(asObject(asObject(l.graph.resources).LightingOut).format).toBe('R16G16B16A16_Float');
+    expect(refs(l.graph, 'Lighting', 'outputs')[1].as).toBe('RTV1');
+    // 2 回目は名前と番号が重ならない
+    const l2 = addOutput(l.graph, 'Lighting');
+    if ('error' in l2) throw new Error(l2.error);
+    expect(refs(l2.graph, 'Lighting', 'outputs')[2]).toMatchObject({ res: 'LightingOut2', as: 'RTV2' });
+  });
+
+  it('RTV が 8 つ埋まっていたらエラー、Compute は UAV と bind', () => {
+    let g: JsonObject = graph;
+    for (let i = 0; i < 7; ++i) {
+      const r = addOutput(g, 'Lighting');
+      if ('error' in r) throw new Error(r.error);
+      g = r.graph;
+    }
+    expect(addOutput(g, 'Lighting')).toMatchObject({ error: expect.stringMatching(/8 つ/) });
+    const c = addPass(graph, 'Compute', 'x', [0, 0]);
+    const u = addOutput(c.graph, c.name);
+    if ('error' in u) throw new Error(u.error);
+    expect(refs(u.graph, c.name, 'outputs').at(-1)).toMatchObject({ as: 'UAV', bind: { param: 0, offset: 0 } });
+  });
+
+  it('入力は書いていないテクスチャを、まだ読んでいないものから選び、次の bind で読む', () => {
+    const r = addInput(graph, 'Composite');
+    if ('error' in r) throw new Error(r.error);
+    expect(refs(r.graph, 'Composite', 'inputs')[1]).toEqual({ res: 'gbAlbedo', as: 'SRV', bind: { param: 1, offset: 1 } });
+    // GBuffer は gbAlbedo / gbNormal / depth を書いているので、sceneColor を読む
+    const g = addInput(graph, 'GBuffer');
+    if ('error' in g) throw new Error(g.error);
+    expect(refs(g.graph, 'GBuffer', 'inputs')[0].res).toBe('sceneColor');
   });
 });

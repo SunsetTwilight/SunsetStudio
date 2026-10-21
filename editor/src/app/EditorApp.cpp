@@ -177,6 +177,88 @@ EditOutcome applyPipelineEdit(ViewportRenderer& scene, const std::string& id, co
 	return o;
 }
 
+// パイプラインのアセット全体 (shaders / layout / state) の JSON
+Json pipelineAssetJson(const gfx::rg::PipelineAsset& asset)
+{
+	return Json::parse(gfxJsonStringify(gfx::rg::pipelineAssetToJson(asset)));
+}
+
+// パイプラインのアセット全体を json に差し替える (元に戻す / やり直すの "pipelineAsset")
+EditOutcome applyPipelineAssetEdit(ViewportRenderer& scene, const std::string& id, const Json& json)
+{
+	EditOutcome o;
+	GfxJson gj;
+	std::string error;
+	gfx::rg::PipelineAsset next;
+	if (!gfxJsonParse(json.dump(), gj, &error) || !gfx::rg::pipelineAssetFromJson(gj, next))
+	{
+		o.message = "パイプラインのアセットの JSON が不正です: " + id;
+		return o;
+	}
+	if (!scene.pipelines().set(id, next))
+	{
+		o.code    = BridgeError::Internal;
+		o.message = "パイプラインを作り直せませんでした (理由はログを確認してください)。元の設定のままです";
+		return o;
+	}
+	o.ok = true;
+	return o;
+}
+
+// 記述子テーブル (root パラメーター param) を size 個まで広げる。最後のレンジの数を増やす。
+// 広げる必要がなければ grown = false で ok
+EditOutcome growDescriptorTable(ViewportRenderer& scene, const std::string& id, uint32_t param, uint32_t size, bool& grown)
+{
+	EditOutcome o;
+	grown = false;
+	const gfx::rg::PipelineAsset* current = scene.pipelines().asset(id);
+	if (!current)
+	{
+		o.message = "パイプラインのアセット '" + id + "' を読めません";
+		return o;
+	}
+	gfx::rg::PipelineAsset next = *current;
+	GfxBindingLayoutDesc&  l    = next.layout;
+	if (param >= l.numParameters || l.parameters[param].parameterType != GfxRootParameterType::DescriptorTable)
+	{
+		o.message = "param " + std::to_string(param) + " は記述子テーブルではありません (" + id + ")";
+		return o;
+	}
+	const GfxRootParameter& rp = l.parameters[param];
+	if (rp.numRanges == 0 || rp.firstRange + rp.numRanges > l.numRanges)
+	{
+		o.message = "param " + std::to_string(param) + " のテーブルにレンジがありません (" + id + ")";
+		return o;
+	}
+	uint64_t total = 0;
+	for (uint32_t i = rp.firstRange; i < rp.firstRange + rp.numRanges; ++i)
+	{
+		if (l.ranges[i].numDescriptors == 0xFFFFFFFFu)
+			return o.ok = true, o;   // 上限なし: 広げなくてよい
+		total += l.ranges[i].numDescriptors;
+	}
+	if (total >= size)
+		return o.ok = true, o;
+	GfxDescriptorRange& last = l.ranges[rp.firstRange + rp.numRanges - 1];
+	if (last.rangeType == GfxDescriptorRangeType::Sampler)
+	{
+		o.message = "param " + std::to_string(param) + " は Sampler のテーブルです (" + id + ")";
+		return o;
+	}
+	last.numDescriptors += static_cast<uint32_t>(size - total);
+	o.before = pipelineAssetJson(*current);
+	if (!scene.pipelines().set(id, next))
+	{
+		o.code    = BridgeError::Internal;
+		o.message = "パイプラインを作り直せませんでした (理由はログを確認してください)。元の設定のままです";
+		return o;
+	}
+	o.after = pipelineAssetJson(*scene.pipelines().asset(id));
+	o.ok    = true;
+	grown   = true;
+	return o;
+}
+
 const char* apiName(GraphicsAPI api)
 {
 	switch (api)
@@ -560,6 +642,30 @@ void EditorApp::registerMethods()
 			}
 			recordEdit({ label, "pipeline", id, std::move(o.before), std::move(o.after) });
 			r.ok(o.result);
+		});
+	});
+
+	// 記述子テーブルを size 個まで広げる (パスに入力を加えて、bind がテーブルの範囲外になるとき)。
+	// 広げたら履歴に入れる。result: { grown, size }
+	b.registerMethod("pipeline.growTable", [this, noScene](const Json& p, Bridge::Reply r) {
+		const std::string id    = p.at("id").get<std::string>();
+		const uint32_t    param = p.at("param").get<uint32_t>();
+		const uint32_t    size  = p.at("size").get<uint32_t>();
+		const std::string label = p.value("label", id + " のテーブルを広げる");
+		m_render.postScene([this, r, id, param, size, label, noScene](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return noScene(r);
+			bool grown = false;
+			EditOutcome o = growDescriptorTable(*scene, id, param, size, grown);
+			if (!o.ok)
+				return r.error(o.code, o.message);
+			if (grown)
+			{
+				recordEdit({ label, "pipelineAsset", id, std::move(o.before), std::move(o.after) });
+				m_host.emit("pipeline.changed", { { "id", id } });
+				log("info", "inspector", id + ": param " + std::to_string(param) + " のテーブルを " + std::to_string(size) + " 個に広げました");
+			}
+			r.ok({ { "grown", grown }, { "size", size } });
 		});
 	});
 
@@ -1426,6 +1532,11 @@ void EditorApp::registerEditMethods()
 			}
 			else if (entry.kind == "pipeline")
 				o = applyPipelineEdit(*scene, entry.target, target);
+			else if (entry.kind == "pipelineAsset")
+			{
+				o = applyPipelineAssetEdit(*scene, entry.target, target);
+				if (o.ok) m_render.notifyGraph();
+			}
 			else if (entry.kind == "scene")
 			{
 				SceneDesc desc;
@@ -1450,7 +1561,7 @@ void EditorApp::registerEditMethods()
 				if (undo) m_undo.didUndo();
 				else      m_undo.didRedo();
 				emitEditState();
-				if (entry.kind == "pipeline")
+				if (entry.kind == "pipeline" || entry.kind == "pipelineAsset")
 					m_host.emit("pipeline.changed", { { "id", entry.target } });
 				if (entry.kind == "scene")
 				{

@@ -21,6 +21,7 @@ import {
   applyNodeChanges,
   useReactFlow,
   type Connection,
+  type FinalConnectionState,
   type Edge,
   type IsValidConnection,
   type Node,
@@ -34,10 +35,11 @@ import { openAssetTab, openPipelineTab, openPreviewTab, showPanel } from '../sta
 import { call } from '../bridge/client';
 import { fileName, loadPipelineShaders, shaderErrorsOf, withShaderFile, type Stage } from '../state/assets';
 import { NewShaderDialog } from '../panels/NewShaderDialog';
-import { applyGraph } from '../state/graph';
+import { applyGraph, applyInputGraph } from '../state/graph';
 import { studioStore, useStudio } from '../state/store';
 import {
   addDrawPass,
+  addOutput,
   addPass,
   addResource,
   autoLayout,
@@ -207,12 +209,35 @@ function NodeEditor() {
     return !!s && !!t && s.kind !== t.kind;
   }, []);
 
+  // 「出力 +」を何もない所で離したら、そこに新しいテクスチャを作って出力にする
+  const onConnectEnd = useCallback(
+    (e: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+      if (!graph || state.isValid || state.toNode || state.fromHandle?.id !== 'out:new' || !state.fromNode) return;
+      const n = parseNodeId(state.fromNode.id);
+      if (n?.kind !== 'pass') return;
+      const point = 'changedTouches' in e ? e.changedTouches[0] : e;
+      const p = flow.screenToFlowPosition({ x: point.clientX, y: point.clientY });
+      const r = addOutput(graph.graph, n.name, [p.x, p.y - 20]);
+      if ('error' in r) return setStatus({ kind: 'error', text: r.error });
+      void apply(r.graph, r.label).then((ok) => ok && studioStore.select({ kind: 'resource', name: r.resource }));
+    },
+    [graph, apply, flow],
+  );
+
   const onConnect = useCallback(
     (c: Connection) => {
       if (!graph) return;
       const r = connect(graph.graph, c.source, c.sourceHandle ?? '', c.target, c.targetHandle ?? '');
       if ('error' in r) return setStatus({ kind: 'error', text: r.error });
-      void apply(r.graph, `つなぐ: ${r.label}`);
+      const label = `つなぐ: ${r.label}`;
+      // 新しい入力 (「+ 入力」へつないだ) は、パイプラインのテーブルが足りなければ広げてから送る
+      const t = parseNodeId(c.target);
+      if (t?.kind === 'pass' && c.targetHandle === 'in:new') {
+        setStatus({ kind: 'busy', text: `${label}…` });
+        void applyInputGraph(r.graph, t.name, label).then((err) => setStatus(err ? { kind: 'error', text: err } : { kind: 'ok', text: label }));
+        return;
+      }
+      void apply(r.graph, label);
     },
     [graph, apply],
   );
@@ -372,6 +397,7 @@ function NodeEditor() {
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
           onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
           isValidConnection={isValidConnection}
           onDelete={onDelete}
           onNodeClick={onNodeClick}

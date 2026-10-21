@@ -464,6 +464,53 @@ export function addDrawPass(graph: JsonObject, name: string, pipeline: string, a
   return withPositions(setPasses({ ...graph, resources }, next), positions);
 }
 
+// パスに出力を加える。新しいテクスチャを作り、空いている使い方で書く (Raster は空いている RTV、Compute は UAV、Copy は CopyDst)。
+// フォーマットは、そのパスがすでに RTV で書いているテクスチャに合わせる (なければ R8G8B8A8_Unorm)。
+// at を渡すとノードをそこに置く (ノードエディターで「出力 +」を何もない所で離したとき)
+export function addOutput(graph: JsonObject, passName: string, at?: XY): { graph: JsonObject; label: string; resource: string } | { error: string } {
+  const pass = passesOf(graph).find((p) => p.name === passName);
+  if (!pass) return { error: `パス ${passName} はありません` };
+  const outputs = asArray(pass.outputs).map(asObject);
+  const resources = { ...asObject(graph.resources) };
+  let format = 'R8G8B8A8_Unorm';
+  for (const r of outputs) {
+    const f = formatOf(graph, String(r.res ?? ''));
+    if (String(r.as ?? '').startsWith('RTV') && f && !isDepthFormat(f)) {
+      format = f;
+      break;
+    }
+  }
+  const as = nextOutputAs(pass, format);
+  const used = new Set(outputs.map((r) => String(r.as ?? '')));
+  if (as.startsWith('RTV') && used.has(as)) return { error: `${passName} の RTV は 8 つまでです (空きがありません)` };
+  const name = uniqueName(`${passName}Out`, new Set(Object.keys(resources)));
+  resources[name] = { format, size: { relative: 1 } };
+  const ref: JsonObject = { res: name, as };
+  if (as.startsWith('RTV')) ref.load = 'clear';
+  if (as === 'UAV') ref.bind = nextBind(pass);
+  const next = passesOf(graph).map((p) => (p.name === passName ? { ...p, outputs: [...outputs, ref] } : p));
+  let g = setPasses({ ...graph, resources }, next);
+  if (at) g = withPositions(g, { ...savedPositions(g), [resId(name)]: at });
+  return { graph: g, label: `${passName} の出力に ${name} (${as}) を追加`, resource: name };
+}
+
+// パスに入力を加える。そのパスが書いていないテクスチャを選び、SRV で読む (bind は今ある bind の次)。Copy のパスは CopySrc
+export function addInput(graph: JsonObject, passName: string): { graph: JsonObject; label: string } | { error: string } {
+  const pass = passesOf(graph).find((p) => p.name === passName);
+  if (!pass) return { error: `パス ${passName} はありません` };
+  const written = new Set(asArray(pass.outputs).map((v) => String(asObject(v).res ?? '')));
+  const read = new Set(asArray(pass.inputs).map((v) => String(asObject(v).res ?? '')));
+  const resources = asObject(graph.resources);
+  const textures = Object.keys(resources).filter((n) => String(asObject(resources[n]).kind ?? 'texture') === 'texture' && !written.has(n));
+  const res = textures.find((n) => !read.has(n)) ?? textures[0];
+  if (!res) return { error: `${passName} が読めるテクスチャがありません (書いているものは読めません)` };
+  const as = pass.type === 'Copy' ? 'CopySrc' : 'SRV';
+  const ref: JsonObject = { res, as };
+  if (as === 'SRV') ref.bind = nextBind(pass);
+  const next = passesOf(graph).map((p) => (p.name === passName ? { ...p, inputs: [...asArray(p.inputs), ref] } : p));
+  return { graph: setPasses(graph, next), label: `${passName} の入力に ${res} (${as}) を追加` };
+}
+
 export function addResource(graph: JsonObject, kind: 'texture' | 'buffer', at: XY): { graph: JsonObject; name: string } {
   const resources = { ...asObject(graph.resources) };
   const name = uniqueName(kind === 'texture' ? 'tex' : 'buf', new Set(Object.keys(resources)));
