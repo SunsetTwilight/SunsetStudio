@@ -142,6 +142,14 @@ export function App() {
     void loadScene();
   }, [project?.open, project?.file]);
 
+  // 別ウィンドウのビューポートをメインに戻したとき、ビューポートのパネルを閉じていたら開く (戻る先がなく見えなくなるため)
+  const floating = useStudio((s) => s.viewportFloating);
+  const wasFloating = useRef(false);
+  useEffect(() => {
+    if (wasFloating.current && !floating) showPanel('viewport');
+    wasFloating.current = floating;
+  }, [floating]);
+
   // 選んでいる物体をビューポートに伝える (辺の印)
   const selection = useStudio((s) => s.selection);
   const selectedObject = selection?.kind === 'object' ? selection.id : '';

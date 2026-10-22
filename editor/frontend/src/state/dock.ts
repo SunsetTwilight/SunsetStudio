@@ -100,6 +100,18 @@ export function showPanel(id: string) {
     existing.api.setActive();
     return;
   }
+  // ビューポートは既定の配置と同じく、ノードエディターの上 (なければインスペクターの左)
+  if (id === 'viewport') {
+    const below = dockApi.getPanel('nodes') ?? dockApi.getPanel('log');
+    const right = dockApi.getPanel('inspector');
+    dockApi.addPanel({
+      id,
+      component: id,
+      title: PANEL_TITLES[id],
+      position: below ? { referencePanel: below.id, direction: 'above' } : right ? { referencePanel: right.id, direction: 'left' } : undefined,
+    });
+    return;
+  }
   // シーンはレンダーグラフと同じ場所 (左)、ほかはノードエディターの場所
   const ref =
     (id === 'scene' || id === 'library' ? dockApi.getPanel('graph') : undefined) ?? dockApi.getPanel('nodes') ?? dockApi.getPanel('log') ?? dockApi.getPanel('viewport');

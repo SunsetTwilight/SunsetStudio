@@ -124,6 +124,7 @@ export function TitleBar() {
         label: '表示',
         mnemonic: 'V',
         items: [
+          panel('viewport', 'P'),
           panel('scene', 'S'),
           panel('library', 'L'),
           panel('graph', 'G'),
