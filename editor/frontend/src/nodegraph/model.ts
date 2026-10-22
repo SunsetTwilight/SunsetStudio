@@ -8,6 +8,8 @@
 //    w:<パス>:<番号>  パスの出力 → リソース (書く)
 //    r:<パス>:<番号>  リソース → パスの入力 (読む)
 //  ノードの位置はグラフの JSON の editor.nodes に { "pass:GBuffer": [x, y] } の形で持つ (エンジンは保つだけ)。
+//  入力 / 出力は定義名 (name) を持ち、リソース (res) は省略できる (未接続)。未接続の入力 (SRV / UAV) は 0 を読み、
+//  未接続の出力はエンジンがパス専用のテクスチャ "<パス>.<定義名>" を作って書く。線を消すと未接続にする
 //
 //  編集の関数はすべて、グラフの JSON を受け取って新しい JSON を返す (元は変えない)。
 //  送るのは state/graph.ts の applyGraph (graph.set) なので、元に戻す / やり直すもそのまま効く。
@@ -20,7 +22,8 @@ export type XY = [number, number];
 
 export interface RefInfo {
   index: number;
-  res: string;
+  name: string; // 定義名 (空ならエディターが既定の名前を入れる前)
+  res: string; // 空 = 未接続
   as: string;
   load?: string;
   bind?: string; // "p1:o2"
@@ -74,6 +77,7 @@ function refsOf(pass: JsonObject, key: 'inputs' | 'outputs'): RefInfo[] {
     const r = asObject(v);
     return {
       index,
+      name: String(r.name ?? ''),
       res: String(r.res ?? ''),
       as: String(r.as ?? ''),
       load: r.load === undefined ? undefined : String(r.load),
@@ -88,6 +92,21 @@ function sizeText(r: JsonObject): string {
   if (s.width !== undefined) return `${String(s.width)}×${String(s.height)}`;
   if (r.bytes !== undefined) return `${String(r.bytes)} B`;
   return '';
+}
+
+// 定義名を書けない / 未接続にできない使い方 (未接続にできるのは、入力の SRV / UAV と、出力の RTV / UAV / DSV)
+export function canDisconnect(as: string, output: boolean): boolean {
+  return output ? as.startsWith('RTV') || as === 'UAV' || as === 'DSV' : as === 'SRV' || as === 'UAV';
+}
+
+// 未接続の出力の書き先 (エンジンの Compiler の generatePortResources と同じ決まり)。接続していれば null
+export function generatedTexture(passName: string, ref: JsonObject, index: number): { resource: string; format: string } | null {
+  if (typeof ref.res === 'string' && ref.res !== '') return null;
+  const as = String(ref.as ?? '');
+  if (!canDisconnect(as, true)) return null;
+  const name = typeof ref.name === 'string' && ref.name ? ref.name : `out${index}`;
+  const format = typeof ref.format === 'string' && ref.format ? ref.format : as === 'DSV' ? 'D32_Float' : 'R16G16B16A16_Float';
+  return { resource: `${passName}.${name}`, format };
 }
 
 // ---- ノードの結果を表示する (右クリックのメニュー) ----
@@ -117,6 +136,14 @@ export function previewTargets(graph: JsonObject, nodeId: string): PreviewTarget
   if (!pass) return [];
   const out: PreviewTarget[] = [];
   const seen = new Set<string>();
+  // 未接続の出力: エンジンが作るパス専用のテクスチャ
+  for (const r of refsOf(pass, 'outputs')) {
+    const g = generatedTexture(n.name, asObject(asArray(pass.outputs)[r.index]), r.index);
+    if (g) {
+      seen.add(g.resource);
+      out.push({ resource: g.resource, format: g.format, role: 'output' });
+    }
+  }
   for (const [key, role] of [['outputs', 'output'], ['inputs', 'input']] as const)
     for (const r of refsOf(pass, key)) {
       const f = textureOf(r.res);
@@ -334,7 +361,7 @@ export function connect(graph: JsonObject, source: string, sourceHandle: string,
   return { graph: setPasses(graph, next), label: `${pass} → ${res} (出力)` };
 }
 
-// 線を消す (パスの入力 / 出力から外す)
+// 線を消す。未接続にできる入力 / 出力 (canDisconnect) は定義名を残して未接続に、ほかは入力 / 出力ごと外す
 export function removeEdges(graph: JsonObject, edgeIds: string[]): JsonObject {
   const drop = new Map<string, { inputs: Set<number>; outputs: Set<number> }>();
   for (const id of edgeIds) {
@@ -349,10 +376,19 @@ export function removeEdges(graph: JsonObject, edgeIds: string[]): JsonObject {
     passesOf(graph).map((p) => {
       const d = drop.get(String(p.name));
       if (!d) return p;
+      const cut = (refs: JsonValue[], hit: Set<number>, output: boolean) =>
+        refs.flatMap((v, i) => {
+          if (!hit.has(i)) return [v];
+          const r = asObject(v);
+          if (!canDisconnect(String(r.as ?? ''), output)) return [];
+          const { res: _res, ...rest } = r;
+          void _res;
+          return [rest];
+        });
       return {
         ...p,
-        inputs: asArray(p.inputs).filter((_, i) => !d.inputs.has(i)),
-        outputs: asArray(p.outputs).filter((_, i) => !d.outputs.has(i)),
+        inputs: cut(asArray(p.inputs), d.inputs, false),
+        outputs: cut(asArray(p.outputs), d.outputs, true),
       };
     }),
   );
@@ -525,6 +561,51 @@ export function addInput(graph: JsonObject, passName: string): { graph: JsonObje
   if (as === 'SRV') ref.bind = nextBind(pass);
   const next = passesOf(graph).map((p) => (p.name === passName ? { ...p, inputs: [...asArray(p.inputs), ref] } : p));
   return { graph: setPasses(graph, next), label: `${passName} の入力に ${res} (${as}) を追加` };
+}
+
+// 未接続の入力 / 出力を加える (インスペクターの「追加」)。定義名はエディター (graph.set) がシェーダーの変数名から入れる。
+// 入力は SRV (bind は今ある bind の次。パイプラインに空きがなければ applyInputGraph が確保する)、
+// 出力は空いている RTV (Compute は UAV)。Copy のパスはコピー元 / 先が要るので、ノードエディターでつなぐ
+export function addInputPort(graph: JsonObject, passName: string): { graph: JsonObject; label: string } | { error: string } {
+  const pass = passesOf(graph).find((p) => p.name === passName);
+  if (!pass) return { error: `パス ${passName} はありません` };
+  if (pass.type === 'Copy') return { error: 'Copy のパスの入力は、ノードエディターでリソースからつないでください' };
+  const ref: JsonObject = { as: 'SRV', bind: nextBind(pass) };
+  const next = passesOf(graph).map((p) => (p.name === passName ? { ...p, inputs: [...asArray(p.inputs), ref] } : p));
+  return { graph: setPasses(graph, next), label: `${passName} に入力を追加 (未接続)` };
+}
+
+export function addOutputPort(graph: JsonObject, passName: string): { graph: JsonObject; label: string } | { error: string } {
+  const pass = passesOf(graph).find((p) => p.name === passName);
+  if (!pass) return { error: `パス ${passName} はありません` };
+  if (pass.type === 'Copy') return { error: 'Copy のパスの出力は、ノードエディターでリソースへつないでください' };
+  const outputs = asArray(pass.outputs).map(asObject);
+  const as = nextOutputAs(pass, 'R16G16B16A16_Float');
+  if (as.startsWith('RTV') && outputs.some((r) => r.as === as)) return { error: `${passName} の RTV は 8 つまでです (空きがありません)` };
+  const ref: JsonObject = { as };
+  if (as.startsWith('RTV')) ref.load = 'clear';
+  if (as === 'UAV') ref.bind = nextBind(pass);
+  const next = passesOf(graph).map((p) => (p.name === passName ? { ...p, outputs: [...outputs, ref] } : p));
+  return { graph: setPasses(graph, next), label: `${passName} に出力 ${as} を追加 (未接続)` };
+}
+
+// 定義名を変える。同じパスの入力 (または出力) の中で重ならないこと
+export function renamePort(graph: JsonObject, passName: string, key: 'inputs' | 'outputs', index: number, to: string): JsonObject | string {
+  const name = to.trim();
+  if (!name) return '定義名が空です';
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return '定義名は英数字と _ (先頭は英字か _) にしてください';
+  const pass = passesOf(graph).find((p) => p.name === passName);
+  if (!pass) return `パス ${passName} はありません`;
+  const refs = asArray(pass[key]).map(asObject);
+  if (refs.some((r, i) => i !== index && r.name === name)) return `${name} はこのパスの${key === 'inputs' ? '入力' : '出力'}にすでにあります`;
+  return withPassRefs(graph, passName, key, refs.map((r, i) => (i === index ? { ...r, name } : r)));
+}
+
+function withPassRefs(graph: JsonObject, passName: string, key: 'inputs' | 'outputs', refs: JsonObject[]): JsonObject {
+  return setPasses(
+    graph,
+    passesOf(graph).map((p) => (p.name === passName ? { ...p, [key]: refs } : p)),
+  );
 }
 
 export function addResource(graph: JsonObject, kind: 'texture' | 'buffer', at: XY): { graph: JsonObject; name: string } {

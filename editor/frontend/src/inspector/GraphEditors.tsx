@@ -1,9 +1,10 @@
 // ============================================================
 //  インスペクター: レンダーグラフのパスとリソースの編集
 //
-//    PassEditor     有効 / 無効、パイプライン、順序、入力と出力 (リソース、使い方、load、bind)
+//    PassEditor     有効 / 無効、パイプライン、順序、入力と出力 (定義名、使い方、load、bind)。
+//                   どのリソースとつなぐかはノードエディターで決める (ここは表示だけ。未接続も可)
 //                   入力 / 出力ごとに、届く先のシェーダーの変数 (→ t0 gAlbedo / → SV_Target1) とずれの警告 (pass.linkage)。
-//                   宣言がなければ「宣言を作る」(pass.declare)、どの入力もつないでいない変数は「つなぐ」で入力を足す
+//                   宣言がなければ「宣言を作る」(pass.declare)、どの入力もつないでいない変数は「入力を作る」で未接続の入力を足す
 //    ResourceEditor フォーマット、大きさ、mip、サンプル数
 //  変えるたびにグラフ全体を graph.set で送り、エディターがコンパイルし直す (ビューポートにすぐ反映される)。
 //  コンパイルできない変更はエラー (理由とパス付き) になり、ビューポートは前のグラフのまま。
@@ -16,7 +17,6 @@ import {
   asArray,
   asObject,
   findPass,
-  resourceNames,
   withPass,
   withResource,
   applyInputGraph,
@@ -25,7 +25,8 @@ import {
 } from '../state/graph';
 import { studioStore } from '../state/store';
 import { showInViewer } from '../panels/ViewerPanel';
-import { renamePass, renameResource, addInput, addOutput } from '../nodegraph/model';
+import { renamePass, renameResource, addInputPort, addOutputPort, renamePort, generatedTexture } from '../nodegraph/model';
+import { openPreviewTab } from '../state/dock';
 
 // 名前の欄 (Enter かフォーカスを外したときに確定する)
 export function NameBox({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
@@ -163,12 +164,10 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
   const [renameError, setRenameError] = useState('');
   const { link, refresh } = usePassLinkage(name, graph.revision);
   const [linkStatus, setLinkStatus] = useState('');
-  const [pick, setPick] = useState<Record<string, string>>({}); // つなぐ変数 → 選んだリソース
   const g = graph.graph;
   const pass = findPass(g, name);
   if (!pass) return <div className="placeholder">パス '{name}' はありません</div>;
 
-  const names = resourceNames(g);
   const executed = graph.order.indexOf(name);
   const skipped = graph.skipped.find((s) => s.name === name);
   const diags = graph.diagnostics.filter((d) => d.path.startsWith(`passes[${name}]`));
@@ -190,9 +189,9 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
     const setRef = (i: number, ref: JsonObject, what: string) =>
       update((p) => ({ ...p, [key]: refs.map((r, k) => (k === i ? ref : r)) }), what);
     const removeRef = (i: number) => update((p) => ({ ...p, [key]: refs.filter((_, k) => k !== i) }), `${key}[${i}] を削除`);
-    // 出力は新しいテクスチャを空いている RTV / UAV で、入力はまだ読んでいないテクスチャを空いている bind で加える
+    // 未接続の入力 / 出力を加える (定義名はエディターがシェーダーの変数名から入れる。つなぐのはノードエディター)
     const addRef = () => {
-      const r = key === 'inputs' ? addInput(g, name) : addOutput(g, name);
+      const r = key === 'inputs' ? addInputPort(g, name) : addOutputPort(g, name);
       if ('error' in r) return void setRenameError(r.error);
       setRenameError('');
       if (key === 'outputs') return void apply(r.graph, r.label);
@@ -213,10 +212,24 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
           const as = String(r.as ?? '');
           const bind = asObject(r.bind);
           const path = `${key}[${i}]`;
+          const res = typeof r.res === 'string' ? r.res : '';
+          const portLink = links?.find((l) => l.index === i);
+          const gen = key === 'outputs' ? generatedTexture(name, r, i) : null;
+          const resFormat = res ? String(asObject(asObject(g.resources)[res]).format ?? '') : '';
           return (
             <div key={i} className="ref-row linked">
               <div className="ref-fields">
-                <Select value={String(r.res ?? '')} options={names} onChange={(v) => setRef(i, { ...r, res: v }, `${path}.res = ${v}`)} />
+                <span className="ref-name" title="定義名 (シェーダーの変数名が既定)">
+                  <NameBox
+                    value={String(r.name ?? '')}
+                    onCommit={(to) => {
+                      const next = renamePort(g, name, key, i, to);
+                      if (typeof next === 'string') return setRenameError(next);
+                      setRenameError('');
+                      void apply(next, `${path}.name = ${to}`);
+                    }}
+                  />
+                </span>
                 <Select
                   value={as}
                   options={key === 'inputs' ? INPUT_AS : OUTPUT_AS}
@@ -242,7 +255,26 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
                   ×
                 </button>
               </div>
-              <LinkLine link={links?.find((l) => l.index === i)} output={key === 'outputs'} onDeclare={() => declare(key === 'inputs' ? 'input' : 'output', i)} />
+              <div className={`ref-link ${res ? '' : 'unconnected'}`} title="つなぐ / 外すのはノードエディターで">
+                {res
+                  ? key === 'inputs'
+                    ? `← ${res}`
+                    : `→ ${res}`
+                  : key === 'inputs'
+                    ? '未接続 (0 を読む)'
+                    : gen
+                      ? `未接続 (パス専用のテクスチャ ${gen.resource} に書く)`
+                      : '未接続'}
+                {key === 'outputs' && (gen || (res && !res.startsWith('$') && resFormat)) && (
+                  <button
+                    title="この出力の結果をタブで表示する"
+                    onClick={() => (gen ? openPreviewTab(gen.resource, gen.format) : openPreviewTab(res, resFormat))}
+                  >
+                    表示
+                  </button>
+                )}
+              </div>
+              <LinkLine link={portLink} output={key === 'outputs'} onDeclare={() => declare(key === 'inputs' ? 'input' : 'output', i)} />
             </div>
           );
         })}
@@ -320,7 +352,6 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
           </div>
           {(link.unconnected ?? []).map((d) => {
             const key = `${d.cls}${d.reg}/${d.space}`;
-            const res = pick[key] ?? '';
             return (
               <div key={key} className="ref-row">
                 <span className="link-var" title={d.file ? `${d.file}:${d.line}` : 'リフレクションで分かったもの'}>
@@ -328,28 +359,17 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
                   {!d.used && <span className="muted"> (未使用)</span>}
                 </span>
                 {d.cls === 't' && d.space === 0 ? (
-                  <>
-                    <select value={res} onChange={(e) => setPick({ ...pick, [key]: e.target.value })}>
-                      <option value="">リソースを選ぶ…</option>
-                      {names.map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      disabled={!res}
-                      title="このリソースを読む入力を足し、パイプラインにこのレジスタを指す場所を作る"
-                      onClick={() => {
-                        setLinkStatus('');
-                        void connectShaderVar(g, name, res, d.reg, `パス ${name}: ${res} を ${d.name} (${d.register}) につなぐ`).then((err) =>
-                          setLinkStatus(err ? `エラー: ${err}` : `${res} を ${d.name} につなぎました`),
-                        );
-                      }}
-                    >
-                      つなぐ
-                    </button>
-                  </>
+                  <button
+                    title="この変数を読む未接続の入力 (定義名は変数名) を足し、パイプラインにこのレジスタを指す場所を作る。リソースはノードエディターでつなぐ"
+                    onClick={() => {
+                      setLinkStatus('');
+                      void connectShaderVar(g, name, d.name, d.reg, `パス ${name}: ${d.name} (${d.register}) の入力を作る`).then((err) =>
+                        setLinkStatus(err ? `エラー: ${err}` : `入力 ${d.name} を作りました (ノードエディターでリソースをつないでください)`),
+                      );
+                    }}
+                  >
+                    入力を作る
+                  </button>
                 ) : (
                   <span className="muted">(UAV / space 付きは手でつないでください)</span>
                 )}

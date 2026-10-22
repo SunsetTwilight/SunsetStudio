@@ -132,6 +132,8 @@ export interface GraphResourceInfo {
   used: boolean;
   firstPass: number;
   lastPass: number;
+  generated?: boolean; // 未接続の出力のためにコンパイラーが作ったテクスチャ ("<パス>.<定義名>")
+  format?: string; // generated のときのフォーマット
 }
 
 export interface GraphInfo {

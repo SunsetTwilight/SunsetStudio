@@ -7,7 +7,9 @@ import { asArray, asObject, passesOf } from '../state/graph';
 import {
   addDrawPass,
   addInput,
+  addInputPort,
   addOutput,
+  addOutputPort,
   addPass,
   addResource,
   autoLayout,
@@ -19,6 +21,7 @@ import {
   removeEdges,
   removeNodes,
   renamePass,
+  renamePort,
   renameResource,
   savedPositions,
   withPositions,
@@ -107,7 +110,9 @@ describe('connect', () => {
     if ('error' in r) throw new Error(r.error);
     expect(refs(r.graph, 'Lighting', 'outputs')[1]).toEqual({ res: added.name, as: 'RTV1', load: 'clear' });
 
-    const noDepth = removeEdges(graph, ['w:GBuffer:2']);
+    const noDepth = removeNodes(addResource(graph, 'texture', [0, 0]).graph, []);
+    const gb = asObject(passesOf(noDepth).find((p) => p.name === 'GBuffer'));
+    gb.outputs = asArray(gb.outputs).slice(0, 2);
     const d = connect(noDepth, 'pass:GBuffer', 'out:new', 'res:depth', 'in');
     if ('error' in d) throw new Error(d.error);
     expect(refs(d.graph, 'GBuffer', 'outputs')[2]).toEqual({ res: 'depth', as: 'DSV', load: 'clear' });
@@ -120,10 +125,37 @@ describe('connect', () => {
 });
 
 describe('削除と追加', () => {
-  it('線を消すと入力 / 出力から外す', () => {
+  it('線を消すと未接続にする (定義名と使い方は残す)。未接続にできない使い方は外す', () => {
     const g = removeEdges(graph, ['r:Lighting:1', 'w:GBuffer:0']);
-    expect(refs(g, 'Lighting', 'inputs').map((r) => r.res)).toEqual(['gbAlbedo', 'depth']);
-    expect(refs(g, 'GBuffer', 'outputs').map((r) => r.res)).toEqual(['gbNormal', 'depth']);
+    expect(refs(g, 'Lighting', 'inputs').map((r) => r.res ?? '')).toEqual(['gbAlbedo', '', 'depth']);
+    expect(refs(g, 'Lighting', 'inputs')[1]).toMatchObject({ as: 'SRV', bind: { param: 1, offset: 1 } });
+    expect(refs(g, 'GBuffer', 'outputs').map((r) => r.res ?? '')).toEqual(['', 'gbNormal', 'depth']);
+    // 線がなくなる (未接続)
+    expect(buildModel(g).edges.some((e) => e.id === 'r:Lighting:1' || e.id === 'w:GBuffer:0')).toBe(false);
+    const copy: JsonObject = {
+      ...graph,
+      passes: [{ name: 'C', type: 'Copy', inputs: [{ res: 'gbAlbedo', as: 'CopySrc' }], outputs: [{ res: 'sceneColor', as: 'CopyDst' }] }],
+    };
+    const c = removeEdges(copy, ['r:C:0']);
+    expect(refs(c, 'C', 'inputs')).toEqual([]);
+  });
+
+  it('未接続の入力 / 出力を加え、定義名を変える', () => {
+    const i = addInputPort(graph, 'Lighting');
+    if ('error' in i) throw new Error(i.error);
+    expect(refs(i.graph, 'Lighting', 'inputs')[3]).toEqual({ as: 'SRV', bind: { param: 1, offset: 3 } });
+    const o = addOutputPort(graph, 'GBuffer');
+    if ('error' in o) throw new Error(o.error);
+    expect(refs(o.graph, 'GBuffer', 'outputs')[3]).toEqual({ as: 'RTV2', load: 'clear' });
+    expect('error' in addOutputPort({ ...graph, passes: [{ name: 'C', type: 'Copy' }] }, 'C')).toBe(true);
+
+    const n = renamePort(o.graph, 'GBuffer', 'outputs', 3, 'mask');
+    if (typeof n === 'string') throw new Error(n);
+    expect(refs(n, 'GBuffer', 'outputs')[3].name).toBe('mask');
+    expect(renamePort(n, 'GBuffer', 'outputs', 0, 'mask')).toMatch(/すでに/);
+    expect(renamePort(n, 'GBuffer', 'outputs', 0, '1x')).toMatch(/英数字/);
+    // 未接続の出力の結果は、パス専用のテクスチャで表示できる
+    expect(previewTargets(n, 'pass:GBuffer')[0]).toEqual({ resource: 'GBuffer.mask', format: 'R16G16B16A16_Float', role: 'output' });
   });
 
   it('パスを消すと after と位置からも消す、リソースを消すと参照も消す', () => {

@@ -6,6 +6,7 @@
 #include "services/PassLinkage.h"
 
 #include "gfx/rendergraph/GraphJson.h"
+#include "gfx/schema/GfxSchema.h"
 #include "host/FileDialog.h"
 
 #include <fstream>
@@ -96,8 +97,19 @@ Json graphJson(ViewportRenderer& scene)
 		                        { "path", d.path }, { "text", d.message } });
 	Json resources = Json::array();
 	for (const auto& r : c.resources)
-		resources.push_back({ { "name", r.name }, { "kind", gfx::rg::nameOf(r.kind) }, { "used", r.used() },
-		                      { "firstPass", r.firstPass }, { "lastPass", r.lastPass } });
+	{
+		Json x = { { "name", r.name }, { "kind", gfx::rg::nameOf(r.kind) }, { "used", r.used() },
+		           { "firstPass", r.firstPass }, { "lastPass", r.lastPass } };
+		// 未接続の出力のためにコンパイラーが作ったテクスチャ (プレビューで見られる)
+		if (r.descIndex >= static_cast<int32_t>(g.desc().resources.size()))
+			if (const gfx::rg::ResourceDesc* d = c.resourceDesc(g.desc(), r))
+			{
+				const char* f = gfxEnumName(gfxEnumInfo<GfxFormat>(), static_cast<uint64_t>(d->format));
+				x["generated"] = true;
+				x["format"]    = f ? f : "";
+			}
+		resources.push_back(std::move(x));
+	}
 	const std::u8string file = (std::filesystem::path("graphs") / g.file().filename()).generic_u8string();
 	return {
 		{ "file",        std::string(file.begin(), file.end()) },
@@ -123,7 +135,8 @@ struct EditOutcome
 };
 
 // グラフ全体の JSON に切り替える
-EditOutcome applyGraphEdit(ViewportRenderer& scene, const std::string& text)
+// fillNames: 定義名のない入力 / 出力に既定の名前を入れる (編集のとき。元に戻すときは入れない)
+EditOutcome applyGraphEdit(ViewportRenderer& scene, const std::string& text, bool fillNames = false)
 {
 	EditOutcome o;
 	gfx::rg::GraphDesc desc;
@@ -134,6 +147,8 @@ EditOutcome applyGraphEdit(ViewportRenderer& scene, const std::string& text)
 		for (const auto& e : diag.errors) o.message += "\n" + e;
 		return o;
 	}
+	if (fillNames)
+		fillPortNames(scene, desc);
 	gfx::rg::GraphAsset& g = scene.graph();
 	o.before = Json::parse(gfx::rg::graphToString(g.desc()));
 	const bool ok = g.set(std::move(desc), scene.compileOptions());
@@ -823,7 +838,7 @@ void EditorApp::registerMethods()
 		m_render.postScene([this, r, text, label, noScene](GraphicsEngine&, ViewportRenderer* scene) {
 			if (!scene)
 				return noScene(r);
-			EditOutcome o = applyGraphEdit(*scene, text);
+			EditOutcome o = applyGraphEdit(*scene, text, true);
 			if (!o.ok)
 				return r.error(o.code, o.message);
 			m_render.notifyGraph();

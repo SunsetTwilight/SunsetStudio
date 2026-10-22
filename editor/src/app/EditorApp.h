@@ -77,6 +77,9 @@ struct EditorOptions
 	static EditorOptions fromEnvironment(int argc, char** argv);
 };
 
+// 定義名のない入力 / 出力に既定の名前を入れる (シェーダーの変数名など。EditorLinkage.cpp)
+void fillPortNames(ViewportRenderer& scene, gfx::rg::GraphDesc& graph);
+
 class EditorApp
 {
 public:

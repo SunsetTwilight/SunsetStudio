@@ -66,9 +66,9 @@ export async function applyInputGraph(next: JsonObject, passName: string, label:
   return err;
 }
 
-// シェーダーの変数 (t レジスタ reg) に、リソース res を読む入力をつなぐ。パイプラインにそのレジスタを指す場所を
-// 確保し (pipeline.allocInput の register)、返った bind で SRV の入力をパスに足す
-export async function connectShaderVar(graph: JsonObject, passName: string, res: string, reg: number, label: string): Promise<string | null> {
+// シェーダーの変数 (t レジスタ reg) を読む未接続の入力 (定義名 portName) を足す。パイプラインにそのレジスタを指す場所を
+// 確保し (pipeline.allocInput の register)、返った bind で SRV の入力をパスに足す。リソースはノードエディターでつなぐ
+export async function connectShaderVar(graph: JsonObject, passName: string, portName: string, reg: number, label: string): Promise<string | null> {
   const pass = findPass(graph, passName);
   const pipeline = String(pass?.pipeline ?? '');
   if (!pass || !pipeline) return `パス ${passName} にパイプラインがありません`;
@@ -80,7 +80,7 @@ export async function connectShaderVar(graph: JsonObject, passName: string, res:
   }
   const next = withPass(graph, passName, (p) => ({
     ...p,
-    inputs: [...asArray(p.inputs), { res, as: 'SRV', bind: { param: r.param, offset: r.offset } }],
+    inputs: [...asArray(p.inputs), { name: portName, as: 'SRV', bind: { param: r.param, offset: r.offset } }],
   }));
   const err = await applyGraph(next, label);
   if (err && r.changed) await call('edit.undo').catch(() => {});

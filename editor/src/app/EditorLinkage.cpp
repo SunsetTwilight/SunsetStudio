@@ -67,14 +67,11 @@ struct PassInfo
 	std::string                    error;
 };
 
-PassInfo collect(ViewportRenderer& scene, const std::string& passName)
+// reflect = false ならファイルの文字だけ読む (シェーダーをコンパイルしない)
+PassInfo collectFor(ViewportRenderer& scene, const gfx::rg::PassDesc& pass, bool reflect = true)
 {
 	PassInfo info;
-	for (const auto& p : scene.graph().desc().passes)
-		if (p.name == passName)
-			info.pass = &p;
-	if (!info.pass)
-		return info.error = "パス " + passName + " はありません", info;
+	info.pass = &pass;
 	for (const auto& c : info.pass->constants) if (c.bind.valid()) info.graphBound.insert(static_cast<uint32_t>(c.bind.param));
 	for (const auto* refs : { &info.pass->inputs, &info.pass->outputs })
 		for (const auto& r : *refs) if (r.bind.valid()) info.graphBound.insert(static_cast<uint32_t>(r.bind.param));
@@ -122,6 +119,11 @@ PassInfo collect(ViewportRenderer& scene, const std::string& passName)
 			info.targets = parseTargets(t.text);
 		// リフレクション: 使っている変数に印。ファイルで分からなかったもの (register を書いていない) を足す
 		std::string err;
+		if (!reflect)
+		{
+			info.stages.push_back(std::move(t));
+			continue;
+		}
 		if (auto r = scene.nodeResources().reflectStage(st, sg.stage, err))
 		{
 			for (uint32_t b = 0; b < r->bindingCount && b < GFX_MAX_SHADER_BINDINGS; ++b)
@@ -150,6 +152,16 @@ PassInfo collect(ViewportRenderer& scene, const std::string& passName)
 			info.error = err;
 		info.stages.push_back(std::move(t));
 	}
+	return info;
+}
+
+PassInfo collect(ViewportRenderer& scene, const std::string& passName)
+{
+	for (const auto& p : scene.graph().desc().passes)
+		if (p.name == passName)
+			return collectFor(scene, p);
+	PassInfo info;
+	info.error = "パス " + passName + " はありません";
 	return info;
 }
 
@@ -275,17 +287,65 @@ std::string srvTypeFor(const gfx::rg::GraphDesc& g, const std::string& res)
 		}
 	return "Texture2D";
 }
-std::string rtvTypeFor(const gfx::rg::GraphDesc& g, const std::string& res)
+// 出力のフォーマット (つないだリソース、未接続なら参照の format) から、SV_Target のメンバーの型
+std::string rtvTypeFor(const gfx::rg::GraphDesc& g, const gfx::rg::PassResourceRef& ref)
 {
+	GfxFormat f = ref.viewFormat;
 	for (const auto& r : g.resources)
-		if (r.name == res)
-		{
-			const char* n = gfxEnumName(gfxEnumInfo<GfxFormat>(), static_cast<uint64_t>(r.format));
-			if (n && std::string(n).find("Uint") != std::string::npos) return "uint";
-		}
-	return "float4";
+		if (r.name == ref.res)
+			f = r.format;
+	const char* n = gfxEnumName(gfxEnumInfo<GfxFormat>(), static_cast<uint64_t>(f));
+	return n && std::string(n).find("Uint") != std::string::npos ? "uint" : "float4";
 }
 } // namespace
+
+// 定義名のない入力 / 出力に、既定の名前を入れる: 届く先のシェーダーの変数 (入力 / UAV は register の変数、
+// RTV は SV_Target のメンバー)、なければつないだリソースの名前、なければ in<番号> / out<番号>。パスの中で重ならないようにする
+void fillPortNames(ViewportRenderer& scene, gfx::rg::GraphDesc& graph)
+{
+	for (auto& pass : graph.passes)
+	{
+		const bool missing = std::any_of(pass.inputs.begin(), pass.inputs.end(), [](const auto& r) { return r.name.empty(); }) ||
+		                     std::any_of(pass.outputs.begin(), pass.outputs.end(), [](const auto& r) { return r.name.empty(); });
+		if (!missing)
+			continue;
+		const PassInfo info = collectFor(scene, pass, false);
+		const GfxBindingLayoutDesc* layout = info.asset ? &info.asset->layout : nullptr;
+		auto fill = [&](std::vector<gfx::rg::PassResourceRef>& refs, bool output) {
+			std::set<std::string> taken;
+			for (const auto& r : refs)
+				if (!r.name.empty()) taken.insert(r.name);
+			for (size_t i = 0; i < refs.size(); ++i)
+			{
+				auto& r = refs[i];
+				if (!r.name.empty())
+					continue;
+				std::string name;
+				if (output && r.as == gfx::rg::Access::RTV)
+				{
+					for (const TargetDecl& t : info.targets)
+						if (t.index == r.rtvIndex && !t.name.empty()) name = t.name;
+				}
+				else if (r.bind.valid() && layout)
+				{
+					if (const auto slot = tableSlotRegister(*layout, static_cast<uint32_t>(r.bind.param), r.bind.offset))
+						if (const ShaderDecl* d = findDecl(info, slot->cls, slot->reg, slot->space)) name = d->name;
+				}
+				if (name.empty() && !r.res.empty())
+					name = shaderIdentifierFor(r.res[0] == '$' ? r.res.substr(1) : r.res, "");   // $backbuffer → backbuffer
+				if (name.empty())
+					name = (output ? "out" : "in") + std::to_string(i);
+				std::string unique = name;
+				for (int k = 2; taken.count(unique); ++k)
+					unique = name + std::to_string(k);
+				taken.insert(unique);
+				r.name = unique;
+			}
+		};
+		fill(pass.inputs, false);
+		fill(pass.outputs, true);
+	}
+}
 
 void EditorApp::registerLinkageMethods()
 {
@@ -322,12 +382,15 @@ void EditorApp::registerLinkageMethods()
 			std::string text = st->text;
 			std::string name;
 			int line = 0;
+			// 変数名の元: 定義名、なければつないだリソースの名前、なければ in<番号> / out<番号>
+			const std::string base = !ref.name.empty() ? ref.name : !ref.res.empty() ? ref.res : (kind == "output" ? "out" : "in") + std::to_string(index);
+			const std::string from = ref.res.empty() ? "未接続" : ref.res;
 			if (kind == "output" && ref.as == gfx::rg::Access::RTV)
 			{
 				if (std::any_of(info.targets.begin(), info.targets.end(), [&](const TargetDecl& t) { return t.index == ref.rtvIndex; }))
 					return r.error(BridgeError::InvalidParams, "SV_Target" + std::to_string(ref.rtvIndex) + " はもう宣言しています");
-				name = shaderIdentifierFor(ref.res, text);
-				const auto next = insertTargetMember(text, rtvTypeFor(scene->graph().desc(), ref.res), name, ref.rtvIndex, &line);
+				name = shaderIdentifierFor(base, text);
+				const auto next = insertTargetMember(text, rtvTypeFor(scene->graph().desc(), ref), name, ref.rtvIndex, &line);
 				if (!next)
 					return r.error(BridgeError::InvalidParams,
 					               "SV_Target のメンバーを持つ構造体がないので、自動では足せません。PS の戻り値を構造体にしてください (" + st->file + ")");
@@ -342,10 +405,10 @@ void EditorApp::registerLinkageMethods()
 					return r.error(BridgeError::InvalidParams, "bind がパイプラインのテーブルの外です");
 				if (findDecl(info, slot->cls, slot->reg, slot->space))
 					return r.error(BridgeError::InvalidParams, regName(slot->cls, slot->reg, slot->space) + " はもう宣言しています");
-				name = shaderIdentifierFor(ref.res, text);
+				name = shaderIdentifierFor(base, text);
 				const std::string type = slot->cls == 'u' ? "RWTexture2D<float4>" : srvTypeFor(scene->graph().desc(), ref.res);
 				const std::string reg  = std::string(1, slot->cls) + std::to_string(slot->reg) + (slot->space ? ", space" + std::to_string(slot->space) : "");
-				text = insertResourceDecl(text, type + " " + name + " : register(" + reg + ");   // " + ref.res + " (" + pass + " の" +
+				text = insertResourceDecl(text, type + " " + name + " : register(" + reg + ");   // " + from + " (" + pass + " の" +
 				                                (kind == "output" ? "出力" : "入力") + ")", &line);
 			}
 			std::string error;

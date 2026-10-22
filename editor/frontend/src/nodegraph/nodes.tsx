@@ -1,7 +1,8 @@
 // ============================================================
 //  ノードエディターのノード (React Flow のカスタムノード)
 //
-//    PassNode      パス。左に入力 (in:<番号>)、右に出力 (out:<番号>)、最後の行に新しい入力 / 出力 (+)
+//    PassNode      パス。左に入力 (in:<番号>)、右に出力 (out:<番号>)、最後の行に新しい入力 / 出力 (+)。
+//                  行には定義名を出す (未接続は薄く。つないだリソースは線とツールチップで分かる)
 //    ResourceNode  リソース。左 (in) に書くパス、右 (out) から読むパス
 //  実行の情報 (GPU 時間、実行しない理由、コンパイルの診断) は data の runtime に入れて渡す。
 // ============================================================
@@ -32,8 +33,12 @@ function baseName(path: string) {
 function refLabel(r: RefInfo) {
   return r.bind ? `${r.as} ${r.bind}` : r.as;
 }
-function refTitle(r: RefInfo) {
-  return [r.res, r.as, r.bind ? `bind ${r.bind}` : '', r.load ? `load ${r.load}` : ''].filter(Boolean).join(' · ');
+function refTitle(r: RefInfo, output: boolean) {
+  const link = r.res ? (output ? `→ ${r.res}` : `← ${r.res}`) : output ? '未接続 (パス専用のテクスチャに書く)' : '未接続 (0 を読む)';
+  return [r.name, link, r.as, r.bind ? `bind ${r.bind}` : '', r.load ? `load ${r.load}` : ''].filter(Boolean).join(' · ');
+}
+function refClass(r: RefInfo) {
+  return r.res ? 'rf-ref' : 'rf-ref unconnected';
 }
 
 function diagTitle(rt: NodeRuntime) {
@@ -69,20 +74,20 @@ export function PassNode({ data, selected }: NodeProps & { data: PassFlowData })
           const output = data.outputs[i];
           return (
             <div key={i} className="rf-row">
-              <span className="rf-in" title={input ? refTitle(input) : undefined}>
+              <span className="rf-in" title={input ? refTitle(input, false) : undefined}>
                 {input && (
                   <>
                     <Handle type="target" position={Position.Left} id={`in:${i}`} className="rf-handle read" />
-                    <span className="rf-ref">{input.res}</span>
+                    <span className={refClass(input)}>{input.name || input.res || `in${i}`}</span>
                     <span className="rf-as">{refLabel(input)}</span>
                   </>
                 )}
               </span>
-              <span className="rf-out" title={output ? refTitle(output) : undefined}>
+              <span className="rf-out" title={output ? refTitle(output, true) : undefined}>
                 {output && (
                   <>
                     <span className="rf-as">{refLabel(output)}</span>
-                    <span className="rf-ref">{output.res}</span>
+                    <span className={refClass(output)}>{output.name || output.res || `out${i}`}</span>
                     <Handle type="source" position={Position.Right} id={`out:${i}`} className="rf-handle write" />
                   </>
                 )}

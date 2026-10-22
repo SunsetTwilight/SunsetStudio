@@ -457,6 +457,25 @@ select {
 .link-var b {
   font-weight: 600;
 }
+.ref-name input {
+  width: 120px;
+  font-weight: 600;
+}
+.ref-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.ref-link.unconnected {
+  color: var(--muted);
+  font-style: italic;
+}
+.ref-link button {
+  padding: 0 6px;
+  font-size: 11px;
+  font-style: normal;
+}
 .ref-bind {
   display: inline-flex;
   align-items: center;
@@ -770,6 +789,10 @@ input.viewer-range {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.rf-ref.unconnected {
+  color: var(--muted);
+  font-style: italic;
 }
 .rf-as {
   flex-shrink: 0;
