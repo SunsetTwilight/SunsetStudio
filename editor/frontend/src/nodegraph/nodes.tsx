@@ -7,6 +7,8 @@
 //  実行の情報 (GPU 時間、実行しない理由、コンパイルの診断) は data の runtime に入れて渡す。
 // ============================================================
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import type { PortTypeInfo } from '../bridge/protocol';
+import { shortFormat, shortType } from '../state/portTypes';
 import type { PassNodeData, RefInfo, ResourceNodeData } from './model';
 
 export interface NodeRuntime {
@@ -17,6 +19,20 @@ export interface NodeRuntime {
   warnings: string[];
   shader?: string; // パイプラインの PS (Compute なら CS) のファイル名
   shaderErrors?: string[]; // コンパイルに失敗しているシェーダー
+  types?: { inputs: PortTypeInfo[]; outputs: PortTypeInfo[] }; // 入力 / 出力の型とフォーマット (パス)
+}
+
+// 行に出す型 (シェーダーの型 · フォーマット)。型が合わなければ ⚠
+function TypeTag({ t }: { t?: PortTypeInfo }) {
+  if (!t || (!t.type && !t.format)) return null;
+  const text = [shortType(t.type), shortFormat(t.format)].filter(Boolean).join('·');
+  const title = [t.type ? `型 ${t.type}` : '', t.format ? `フォーマット ${t.format}` : '', t.mismatch ?? ''].filter(Boolean).join('\n');
+  return (
+    <span className={`rf-type${t.mismatch ? ' mismatch' : ''}`} title={title}>
+      {t.mismatch ? '⚠' : ''}
+      {text}
+    </span>
+  );
 }
 
 export type PassFlowData = PassNodeData & { runtime: NodeRuntime };
@@ -79,6 +95,7 @@ export function PassNode({ data, selected }: NodeProps & { data: PassFlowData })
                   <>
                     <Handle type="target" position={Position.Left} id={`in:${i}`} className="rf-handle read" />
                     <span className={refClass(input)}>{input.name || input.res || `in${i}`}</span>
+                    <TypeTag t={rt.types?.inputs[i]} />
                     <span className="rf-as">{refLabel(input)}</span>
                   </>
                 )}
@@ -87,6 +104,7 @@ export function PassNode({ data, selected }: NodeProps & { data: PassFlowData })
                 {output && (
                   <>
                     <span className="rf-as">{refLabel(output)}</span>
+                    <TypeTag t={rt.types?.outputs[i]} />
                     <span className={refClass(output)}>{output.name || output.res || `out${i}`}</span>
                     <Handle type="source" position={Position.Right} id={`out:${i}`} className="rf-handle write" />
                   </>

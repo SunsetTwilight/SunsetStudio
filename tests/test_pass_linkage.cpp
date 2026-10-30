@@ -75,6 +75,37 @@ TEST_CASE("PassLinkage: 宣言を読む (コメントは除く)")
 	const auto f = parseTargets("float4 main(PSIn i) : SV_Target\n{");
 	REQUIRE(f.size() == 1);
 	CHECK(f[0].index == 0);
+	CHECK(f[0].type == "float4");
+	CHECK(t[0].type == "float4");
+	const auto u = parseTargets("struct O\n{\n\tuint   mask   : SV_Target2;   // マスク\n};");
+	REQUIRE(u.size() == 1);
+	CHECK(u[0].type == "uint");
+	CHECK(u[0].name == "mask");
+	CHECK(u[0].index == 2);
+}
+
+TEST_CASE("PassLinkage: 型とフォーマットのずれ")
+{
+	CHECK(shaderScalarKind("Texture2D") == ScalarKind::Float);
+	CHECK(shaderScalarKind("Texture2D<float>") == ScalarKind::Float);
+	CHECK(shaderScalarKind("Texture2D<uint>") == ScalarKind::Uint);
+	CHECK(shaderScalarKind("RWTexture2D<int2>") == ScalarKind::Sint);
+	CHECK(shaderScalarKind("min16float4") == ScalarKind::Float);
+	CHECK(shaderScalarKind("") == ScalarKind::Unknown);
+	CHECK(formatScalarKind("R32_Uint") == ScalarKind::Uint);
+	CHECK(formatScalarKind("R16G16_Sint") == ScalarKind::Sint);
+	CHECK(formatScalarKind("D32_Float") == ScalarKind::Float);
+	CHECK(formatScalarKind("R8G8B8A8_Unorm") == ScalarKind::Float);
+
+	CHECK(typeMismatch("float4", "R16G16B16A16_Float").empty());
+	CHECK(typeMismatch("Texture2D<float>", "D32_Float").empty());
+	CHECK(typeMismatch("uint", "R32_Uint").empty());
+	CHECK(typeMismatch("", "R32_Uint").empty());   // 型が分からなければ何も言わない
+	CHECK(typeMismatch("float4", "").empty());
+	const std::string m = typeMismatch("uint", "R8G8B8A8_Unorm");
+	CHECK(m.find("uint") != std::string::npos);
+	CHECK(m.find("R8G8B8A8_Unorm") != std::string::npos);
+	CHECK_FALSE(typeMismatch("Texture2D", "R32_Uint").empty());
 }
 
 TEST_CASE("PassLinkage: bind ⇔ レジスタ")

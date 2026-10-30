@@ -4,7 +4,8 @@
 //  パスの入力 / 出力と、パイプライン、シェーダーの宣言のつながり (2026-10-22)。
 //    pass.linkage  { pass } → { pipeline, stages: [{ stage, file }], inputs: [{ index, slot?, var?, status }],
 //                  outputs: [{ index, target? / slot?, var?, status }], unconnected: [{ name, type, cls, reg, space, used, file, line }],
-//                  targets: [{ index, name, line, connected }] }
+//                  targets: [{ index, name, line, connected }] }。入力 / 出力には type (シェーダーの型)、format、mismatch (型のずれ) も
+//    graph.portTypes {} → { revision, passes: { <パス>: { inputs: [{ index, type?, format?, mismatch? }], outputs: [...] } } }
 //                  status: "ok" / "noDecl" (届く先の宣言がない) / "unused" (宣言しているがシェーダーが使っていない) /
 //                          "noSlot" (bind がテーブルの外) / "none" (シェーダーの変数を使わない使い方)
 //    pass.declare  { pass, kind: "input" | "output", index } → シェーダーのファイルに宣言を書き足す (ホットリロードで反映)
@@ -179,6 +180,59 @@ Json declJson(const ShaderDecl& d)
 	         { "register", regName(d.cls, d.reg, d.space) }, { "used", d.used }, { "file", d.file }, { "line", d.line } };
 }
 
+std::string formatName(GfxFormat f)
+{
+	const char* n = f == GfxFormat::Unknown ? nullptr : gfxEnumName(gfxEnumInfo<GfxFormat>(), static_cast<uint64_t>(f));
+	return n ? n : "";
+}
+
+// 入力 / 出力のフォーマット: 参照の format、つないだリソースのフォーマット、未接続の出力ならエンジンが作るテクスチャ。
+// インポート ($backbuffer など) と未接続の入力は分からない (空)
+std::string refFormat(ViewportRenderer& scene, const gfx::rg::PassDesc& pass, const gfx::rg::PassResourceRef& r, size_t index, bool output)
+{
+	if (r.viewFormat != GfxFormat::Unknown)
+		return formatName(r.viewFormat);
+	const gfx::rg::GraphAsset& g = scene.graph();
+	if (!r.res.empty())
+	{
+		const std::string base = r.res.substr(0, r.res.find('@'));   // name@prev
+		for (const auto& d : g.desc().resources)
+			if (d.name == base && d.kind == gfx::rg::ResourceKind::Texture)
+				return formatName(d.format);
+		return {};
+	}
+	if (!output)
+		return {};
+	const std::string gen = pass.name + "." + (r.name.empty() ? "out" + std::to_string(index) : r.name);
+	if (const gfx::rg::ResourceInfo* info = g.compiled().findResource(gen))
+		if (const gfx::rg::ResourceDesc* d = g.compiled().resourceDesc(g.desc(), *info))
+			return formatName(d->format);
+	return {};
+}
+
+// 入力 / 出力の型 (届く先のシェーダーの変数 / SV_Target の型)、フォーマット、型のずれ
+Json portTypeJson(ViewportRenderer& scene, const PassInfo& info, const gfx::rg::PassResourceRef& r, size_t index, bool output)
+{
+	Json x = { { "index", index } };
+	std::string type;
+	if (output && r.as == gfx::rg::Access::RTV)
+	{
+		for (const TargetDecl& t : info.targets)
+			if (t.index == r.rtvIndex) type = t.type;
+	}
+	else if (r.bind.valid() && info.asset)
+	{
+		if (const auto slot = tableSlotRegister(info.asset->layout, static_cast<uint32_t>(r.bind.param), r.bind.offset))
+			if (const ShaderDecl* d = findDecl(info, slot->cls, slot->reg, slot->space)) type = d->type;
+	}
+	const std::string format = refFormat(scene, *info.pass, r, index, output);
+	if (!type.empty())   x["type"]   = type;
+	if (!format.empty()) x["format"] = format;
+	if (const std::string mm = typeMismatch(type, format); !mm.empty())
+		x["mismatch"] = mm;
+	return x;
+}
+
 Json linkageJson(ViewportRenderer& scene, const std::string& passName)
 {
 	const PassInfo info = collect(scene, passName);
@@ -196,7 +250,7 @@ Json linkageJson(ViewportRenderer& scene, const std::string& passName)
 	const GfxBindingLayoutDesc* layout = info.asset ? &info.asset->layout : nullptr;
 	std::set<std::string> covered;   // つないでいるレジスタ ("t0" など)
 	auto refJson = [&](const gfx::rg::PassResourceRef& r, size_t index, bool output) {
-		Json x = { { "index", index } };
+		Json x = portTypeJson(scene, info, r, index, output);
 		const std::string as = std::string(gfx::rg::nameOf(r.as));
 		if (output && r.as == gfx::rg::Access::RTV)
 		{
@@ -350,6 +404,24 @@ void fillPortNames(ViewportRenderer& scene, gfx::rg::GraphDesc& graph)
 void EditorApp::registerLinkageMethods()
 {
 	Bridge& b = m_host.bridge();
+
+	// すべてのパスの入力 / 出力の型とフォーマット (ノードエディターに出す。ファイルの文字だけを読む)
+	b.registerMethod("graph.portTypes", [this](const Json&, Bridge::Reply r) {
+		m_render.postScene([r](GraphicsEngine&, ViewportRenderer* scene) {
+			if (!scene)
+				return r.error(BridgeError::Unavailable, "プロジェクトを開いていません");
+			Json passes = Json::object();
+			for (const auto& pass : scene->graph().desc().passes)
+			{
+				const PassInfo info = collectFor(*scene, pass, false);
+				Json inputs = Json::array(), outputs = Json::array();
+				for (size_t i = 0; i < pass.inputs.size(); ++i)  inputs.push_back(portTypeJson(*scene, info, pass.inputs[i], i, false));
+				for (size_t i = 0; i < pass.outputs.size(); ++i) outputs.push_back(portTypeJson(*scene, info, pass.outputs[i], i, true));
+				passes[pass.name] = { { "inputs", std::move(inputs) }, { "outputs", std::move(outputs) } };
+			}
+			r.ok({ { "revision", scene->graph().revision() }, { "passes", std::move(passes) } });
+		});
+	});
 
 	b.registerMethod("pass.linkage", [this](const Json& p, Bridge::Reply r) {
 		const std::string pass = p.value("pass", std::string());

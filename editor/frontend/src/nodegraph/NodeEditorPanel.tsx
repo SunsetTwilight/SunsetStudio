@@ -112,6 +112,7 @@ function NodeEditor() {
   const graphUnsaved = useStudio((s) => !!s.unsaved && (s.unsaved.graph || s.unsaved.pipelines.length > 0));
   const pipelineShaders = useStudio((s) => s.pipelineShaders);
   const shaderErrors = useStudio((s) => s.shaderErrors);
+  const portTypes = useStudio((s) => s.portTypes);
   const [newShader, setNewShader] = useState<{ pass: string; pipeline: string; stage: Stage } | null>(null);
   const wrapper = useRef<HTMLDivElement>(null);
   const fitted = useRef(false);
@@ -148,6 +149,15 @@ function NodeEditor() {
       if (main) r.shader = fileName(main);
       r.shaderErrors = shaderErrorsOf(n.data.pipeline, pipelineShaders, shaderErrors).map(fileName);
     }
+    // 入力 / 出力の型とフォーマット
+    for (const n of model.nodes) {
+      if (n.data.kind !== 'pass') continue;
+      const t = portTypes?.passes[n.data.name];
+      if (!t) continue;
+      let r = rt.get(n.id);
+      if (!r) rt.set(n.id, (r = { errors: [], warnings: [] }));
+      r.types = t;
+    }
     const selectedId = selection?.kind === 'pass' ? `pass:${selection.name}` : selection?.kind === 'resource' ? `res:${selection.name}` : '';
     // 作り直しても、React Flow が測った大きさ (measured) を引き継ぐ。引き継がないと、大きさが変わらないノードは
     // 測り直されず、「大きさの分からないノード」として隠れたままになる (ノードを足すと全部が消えて見えた)。
@@ -165,7 +175,7 @@ function NodeEditor() {
         ...(old.get(n.id)?.measured ? { measured: old.get(n.id)!.measured } : {}),
       }));
     });
-  }, [graph, model, positions, gpu, selection, pipelineShaders, shaderErrors]);
+  }, [graph, model, positions, gpu, selection, pipelineShaders, shaderErrors, portTypes]);
 
   useEffect(() => {
     if (!fitted.current && nodes.length > 0) {

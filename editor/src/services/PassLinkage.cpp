@@ -110,9 +110,10 @@ std::vector<ShaderDecl> parseShaderDecls(const std::string& text, const std::str
 
 std::vector<TargetDecl> parseTargets(const std::string& text)
 {
-	// メンバー: <型> <名前> : SV_Target<n>;   関数: ... ) : SV_Target<n>
-	static const std::regex member(R"((\w+)\s*:\s*SV_Target(\d*)\s*;)", std::regex::icase);
+	// メンバー: <型> <名前> : SV_Target<n>;   関数: <型> <名前>(...) : SV_Target<n> (引数が複数行なら型は分からない)
+	static const std::regex member(R"((?:(\w+)\s+)?(\w+)\s*:\s*SV_Target(\d*)\s*;)", std::regex::icase);
 	static const std::regex func(R"(\)\s*:\s*SV_Target(\d*))", std::regex::icase);
+	static const std::regex funcType(R"((\w+)\s+\w+\s*\()");
 	std::vector<TargetDecl> out;
 	bool inBlock = false;
 	const auto lines = splitLines(text);
@@ -121,11 +122,55 @@ std::vector<TargetDecl> parseTargets(const std::string& text)
 		const std::string l = stripComments(lines[i], inBlock);
 		std::smatch m;
 		if (std::regex_search(l, m, member))
-			out.push_back({ m[2].str().empty() ? 0u : static_cast<uint32_t>(std::stoul(m[2].str())), m[1].str(), static_cast<int>(i) + 1 });
+			out.push_back({ m[3].str().empty() ? 0u : static_cast<uint32_t>(std::stoul(m[3].str())), m[2].str(), static_cast<int>(i) + 1, m[1].str() });
 		else if (std::regex_search(l, m, func))
-			out.push_back({ m[1].str().empty() ? 0u : static_cast<uint32_t>(std::stoul(m[1].str())), std::string(), static_cast<int>(i) + 1 });
+		{
+			TargetDecl t{ m[1].str().empty() ? 0u : static_cast<uint32_t>(std::stoul(m[1].str())), std::string(), static_cast<int>(i) + 1, {} };
+			std::smatch f;
+			if (std::regex_search(l, f, funcType))
+				t.type = f[1].str();
+			out.push_back(t);
+		}
 	}
 	return out;
+}
+
+ScalarKind shaderScalarKind(const std::string& shaderType)
+{
+	if (shaderType.empty())
+		return ScalarKind::Unknown;
+	// テクスチャは <> の中 (書いていなければ float4)
+	std::string t = shaderType;
+	const size_t lt = t.find('<');
+	if (lt != std::string::npos)
+		t = t.substr(lt + 1, t.find('>') == std::string::npos ? std::string::npos : t.find('>') - lt - 1);
+	else if (t.find("Texture") != std::string::npos || t.find("Buffer") != std::string::npos)
+		return ScalarKind::Float;
+	for (auto& c : t) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	if (t.find("uint") != std::string::npos || t.find("bool") != std::string::npos) return ScalarKind::Uint;
+	if (t.find("int") != std::string::npos) return ScalarKind::Sint;
+	if (t.find("float") != std::string::npos || t.find("half") != std::string::npos || t.find("double") != std::string::npos ||
+	    t.find("unorm") != std::string::npos || t.find("snorm") != std::string::npos)
+		return ScalarKind::Float;
+	return ScalarKind::Unknown;
+}
+
+ScalarKind formatScalarKind(const std::string& format)
+{
+	if (format.empty() || format == "Unknown")
+		return ScalarKind::Unknown;
+	if (format.find("Uint") != std::string::npos) return ScalarKind::Uint;
+	if (format.find("Sint") != std::string::npos) return ScalarKind::Sint;
+	return ScalarKind::Float;   // Unorm / Snorm / Float / 深度 (シェーダーからは小数で読む)
+}
+
+std::string typeMismatch(const std::string& shaderType, const std::string& format)
+{
+	const ScalarKind s = shaderScalarKind(shaderType), f = formatScalarKind(format);
+	if (s == ScalarKind::Unknown || f == ScalarKind::Unknown || s == f)
+		return {};
+	auto kind = [](ScalarKind k) { return k == ScalarKind::Uint ? "符号なし整数" : k == ScalarKind::Sint ? "符号付き整数" : "小数"; };
+	return "型が合いません: シェーダーは " + shaderType + " (" + kind(s) + ")、" + format + " は" + kind(f) + "のフォーマットです";
 }
 
 std::optional<TableSlot> tableSlotRegister(const GfxBindingLayoutDesc& l, uint32_t param, uint32_t offset)

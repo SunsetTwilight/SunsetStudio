@@ -43,8 +43,16 @@ struct TargetDecl
 	uint32_t    index = 0;
 	std::string name;   // メンバーの名前 (関数の戻り値なら空)
 	int         line  = 0;
+	std::string type;   // 型 ("float4" / "uint" …。分からなければ空)
 };
 std::vector<TargetDecl> parseTargets(const std::string& text);
+
+// 型とフォーマットのずれ: 値の種類 (小数 / 符号なし整数 / 符号付き整数) が合わなければ、理由の文を返す (合えば空)。
+// shaderType は "Texture2D<uint>" / "float4" など、format は GfxFormat の名前 ("R32_Uint" など)。どちらかが空なら空
+enum class ScalarKind { Unknown, Float, Uint, Sint };
+ScalarKind  shaderScalarKind(const std::string& shaderType);
+ScalarKind  formatScalarKind(const std::string& format);
+std::string typeMismatch(const std::string& shaderType, const std::string& format);
 
 // 記述子テーブル (param) の offset 番目が指すレジスタ。テーブルでない / 範囲外なら nullopt
 struct TableSlot

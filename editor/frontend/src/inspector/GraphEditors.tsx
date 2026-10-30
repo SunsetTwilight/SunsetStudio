@@ -274,6 +274,12 @@ export function PassEditor({ graph, name }: { graph: GraphInfo; name: string }) 
                   </button>
                 )}
               </div>
+              {portLink && (portLink.type || portLink.format) && (
+                <div className="ref-type" title="型: 届く先のシェーダーの変数 / SV_Target の型、フォーマット: つないだリソース (未接続の出力は作るテクスチャ)">
+                  型 <code>{portLink.type ?? '?'}</code> ・ フォーマット <code>{portLink.format ?? '?'}</code>
+                </div>
+              )}
+              {portLink?.mismatch && <div className="ref-type mismatch">⚠ {portLink.mismatch}</div>}
               <LinkLine link={portLink} output={key === 'outputs'} onDeclare={() => declare(key === 'inputs' ? 'input' : 'output', i)} />
             </div>
           );

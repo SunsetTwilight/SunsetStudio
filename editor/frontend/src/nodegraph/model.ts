@@ -48,7 +48,7 @@ export interface ResourceNodeData extends Record<string, unknown> {
   resKind: string;
 }
 
-export const PASS_WIDTH = 250;
+export const PASS_WIDTH = 300;
 export const RES_WIDTH = 190;
 export const ROW_HEIGHT = 22;
 

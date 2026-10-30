@@ -3,7 +3,7 @@
 //  パネルは dockview の中で別々に描かれるので、props ではなくここから読む (useStudio)。
 // ============================================================
 import { useSyncExternalStore } from 'react';
-import type { AppInfo, EditState, EngineInfo, LibraryInfo, LightTypeInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, SceneInfo, ViewerPixel, ViewerSettings, Unsaved } from '../bridge/protocol';
+import type { AppInfo, EditState, EngineInfo, LibraryInfo, LightTypeInfo, FrameStats, GraphInfo, LogEntry, PreviewInfo, ProjectInfo, SceneInfo, ViewerPixel, ViewerSettings, Unsaved, PortTypes } from '../bridge/protocol';
 
 // インスペクターに表示するもの (グラフのパネルで選ぶ)
 export type Selection =
@@ -31,6 +31,7 @@ export interface StudioState {
   notice: string; // タイトルバーに少しのあいだ出す知らせ (保存しました など) // 保存していない変更の確認を出している (ウィンドウを閉じる / プロジェクトを閉じる・開く)
   shaderErrors: Record<string, string>; // コンパイルに失敗しているシェーダー (アセットのパス → メッセージ)
   pipelineShaders: Record<string, PipelineShaders>; // パイプラインのアセット → シェーダーのファイル
+  portTypes: PortTypes | null; // パスの入力 / 出力の型とフォーマット (graph.portTypes)
   scene: SceneInfo | null; // ビューポートのシーン (M5-2)
   library: LibraryInfo | null; // アセットのライブラリ (M5-3)
   windowMaximized: boolean; // メインのウィンドウが最大化しているか (タイトルバーのボタン)
@@ -46,7 +47,7 @@ export interface PipelineShaders {
 
 const MAX_LOG_ENTRIES = 5000;
 
-let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, unsaved: null, closePrompt: null, notice: '', shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, windowMaximized: false, commandError: '', lightTypes: [] };
+let state: StudioState = { info: null, engine: null, stats: null, logs: [], connError: null, graph: null, selection: null, project: null, edit: null, viewer: null, viewerPixel: null, previews: [], viewportFloating: false, unsaved: null, closePrompt: null, notice: '', shaderErrors: {}, pipelineShaders: {}, portTypes: null, scene: null, library: null, windowMaximized: false, commandError: '', lightTypes: [] };
 const listeners = new Set<() => void>();
 
 function set(patch: Partial<StudioState>): void {
@@ -88,6 +89,7 @@ export const studioStore = {
     set({ shaderErrors: next });
   },
   setPipelineShaders: (pipelineShaders: Record<string, PipelineShaders>) => set({ pipelineShaders }),
+  setPortTypes: (portTypes: PortTypes | null) => set({ portTypes }),
   setScene: (scene: SceneInfo | null) => set({ scene }),
   setLibrary: (library: LibraryInfo | null) => set({ library }),
   setWindowMaximized: (windowMaximized: boolean) => set({ windowMaximized }),
@@ -98,7 +100,7 @@ export const studioStore = {
     set(
       state.project?.file === project.file && state.project?.open === project.open
         ? { project }
-        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {}, scene: null, library: null, lightTypes: [] },
+        : { project, graph: null, selection: null, stats: null, viewer: null, viewerPixel: null, shaderErrors: {}, pipelineShaders: {}, portTypes: null, scene: null, library: null, lightTypes: [] },
     ),
 };
 

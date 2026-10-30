@@ -790,6 +790,25 @@ input.viewer-range {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.rf-type {
+  flex-shrink: 0;
+  color: #8fb3d9;
+  font: 9px var(--mono);
+}
+.rf-type.mismatch {
+  color: #e0b050;
+}
+.ref-type {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ref-type code {
+  font: 11px var(--mono);
+  color: var(--text, inherit);
+}
+.ref-type.mismatch {
+  color: #e0b050;
+}
 .rf-ref.unconnected {
   color: var(--muted);
   font-style: italic;

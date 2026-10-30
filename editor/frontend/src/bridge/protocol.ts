@@ -320,7 +320,18 @@ export interface ShaderDeclInfo {
 // ok: つながっている / noDecl: 届く先の宣言がない / unused: 宣言しているが使っていない /
 // noSlot: bind がパイプラインのテーブルの外 / none: シェーダーの変数を使わない使い方 (DSV、Copy など)
 export type LinkStatus = 'ok' | 'noDecl' | 'unused' | 'noSlot' | 'none';
-export interface PassLinkRef {
+// 入力 / 出力の型 (届く先のシェーダーの変数 / SV_Target の型) とフォーマット、型のずれ
+export interface PortTypeInfo {
+  index: number;
+  type?: string; // "Texture2D<float>" / "float4" / "uint" …
+  format?: string; // つないだリソース (未接続の出力はエンジンが作るテクスチャ) のフォーマット
+  mismatch?: string; // 型が合わないときの理由
+}
+export interface PortTypes {
+  revision: number;
+  passes: Record<string, { inputs: PortTypeInfo[]; outputs: PortTypeInfo[] }>;
+}
+export interface PassLinkRef extends PortTypeInfo {
   index: number;
   status: LinkStatus;
   register?: string;
@@ -433,6 +444,7 @@ export interface Methods {
     result: { param: number; offset: number; changed: boolean };
   };
   'pass.linkage': { params: { pass: string }; result: PassLinkage };
+  'graph.portTypes': { params: Record<string, never>; result: PortTypes };
   'pass.declare': { params: { pass: string; kind: 'input' | 'output'; index: number }; result: { file: string; name: string; line: number } };
   'graph.get': { params: Record<string, never>; result: GraphInfo };
   'graph.set': { params: { graph: JsonObject; label?: string }; result: GraphInfo };

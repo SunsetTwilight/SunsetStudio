@@ -28,6 +28,7 @@ import { LibraryPanel } from './panels/LibraryPanel';
 import { loadLibrary } from './state/library';
 import { loadScene } from './state/scene';
 import { loadPipelineShaders, loadShaderErrors } from './state/assets';
+import { loadPortTypes } from './state/portTypes';
 import { ViewerPanel } from './panels/ViewerPanel';
 import { TitleBar } from './panels/TitleBar';
 import { UnsavedDialog } from './panels/UnsavedDialog';
@@ -156,6 +157,21 @@ export function App() {
   useEffect(() => {
     if (isConnected() && project?.open) void call('scene.select', { id: selectedObject }).catch(() => {});
   }, [selectedObject, project?.open]);
+
+  // 入力 / 出力の型とフォーマット (ノードとインスペクター)。グラフ、シェーダー、パイプラインが変わったら読み直す
+  const graphRevision = useStudio((s) => s.graph?.revision ?? -1);
+  useEffect(() => {
+    if (!isConnected() || !project?.open || graphRevision < 0) return;
+    void loadPortTypes();
+  }, [graphRevision, project?.open]);
+  useEffect(() => {
+    if (!isConnected()) return;
+    const reload = () => {
+      if (studioStore.get().project?.open) void loadPortTypes();
+    };
+    const offs = [on('shader.reloaded', reload), on('shader.status', reload), on('pipeline.changed', reload)];
+    return () => offs.forEach((off) => off());
+  }, []);
 
   // パイプラインが使うシェーダー (ノードの表示と右クリックのメニュー)。グラフが変わったら読み直す
   const graphPipelines = useStudio((s) => s.graph?.pipelines.join('\n') ?? '');
