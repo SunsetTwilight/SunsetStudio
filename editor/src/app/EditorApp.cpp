@@ -1322,7 +1322,10 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 					m_host.bridge().callLocal("graph.set", { { "graph", original } }, [this, done, full](int s4, const Json& r4) {
 						if (s4 != 0 || r4["order"].size() != full)
 							return done(false, "元に戻せない: " + r4.dump());
-						// 元に戻す (Lighting を無効にした状態) → やり直す (元のグラフ)
+						// 元に戻す (Lighting を無効にした状態) → やり直す (元のグラフ)。
+						// この返事は描画スレッドで届き、履歴への記録 (recordEdit) は UI スレッドに積まれている。
+						// 記録より先に元に戻すと 1 つ前の編集を戻してしまうので、UI スレッドに積んでから呼ぶ
+						m_host.post([this, done, full] {
 						Bridge& br = m_host.bridge();
 						br.callLocal("edit.undo", Json::object(), [this, done, full](int u1, const Json& ru1) {
 						if (u1 != 0)
@@ -1331,6 +1334,7 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 						const auto& order1 = rg1["order"];
 						if (g1 != 0 || std::find(order1.begin(), order1.end(), "Lighting") != order1.end())
 							return done(false, "元に戻したグラフが違う: " + rg1.dump());
+						m_host.post([this, done, full] {   // 元に戻した記録 (didUndo) のあとに
 						m_host.bridge().callLocal("edit.redo", Json::object(), [this, done, full](int u2, const Json& ru2) {
 						if (u2 != 0 || ru2["state"]["canRedo"] != false)
 							return done(false, "edit.redo: " + ru2.dump());
@@ -1352,6 +1356,8 @@ void EditorApp::runGraphSelfCheck(std::function<void(bool ok, const std::string&
 								log("info", "smoke", "graph.save: プロジェクトに保存");
 								done(true, {});
 							});
+						});
+						});
 						});
 						});
 						});
